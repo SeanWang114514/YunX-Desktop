@@ -37,6 +37,17 @@ Android 应用没有可以直接「转换成 exe」的跨平台层 —— Compos
 | 139 网盘 | **可匿名浏览** | 需登录 | AES-128-CBC 加密通道；分享密码明文可见 |
 | 123 云盘 | **可匿名浏览** | 需登录 | CRC-32 签名；无转存步骤 |
 
+## 下载
+
+到 [Releases](https://github.com/SeanWang114514/YunX-Desktop/releases) 下载最新版（Windows x64）：
+
+| 文件 | 说明 |
+|---|---|
+| `YunX-Desktop-<版本>-x64-Setup.exe` | NSIS 安装包，可选安装目录、自动创建快捷方式 |
+| `YunX-Desktop-<版本>-x64-Portable.exe` | 单文件便携版，双击即用，无需安装 |
+
+> 未做代码签名，Windows SmartScreen 可能提示"未知发布者"，选择"仍要运行"即可。
+
 ## 构建
 
 要求：Node.js ≥ 18。
@@ -46,11 +57,14 @@ npm install
 npm run build      # 编译主进程 + 打包渲染层
 npm run dev        # 构建并启动
 npm run dist       # 打包为 Windows 安装包 + 便携版 exe
+npm test           # 运行全部测试（89 项断言）
 ```
 
 产物在 `release/`：
-- `云析 YunX-1.0.0-x64.exe` —— NSIS 安装包（可选安装目录、桌面快捷方式）
-- `云析 YunX-1.0.0-便携版.exe` —— 单文件便携版，双击即用
+- `YunX-Desktop-<版本>-x64-Setup.exe` —— NSIS 安装包（可选安装目录、桌面快捷方式）
+- `YunX-Desktop-<版本>-x64-Portable.exe` —— 单文件便携版，双击即用
+
+推 `v*` tag 会触发 GitHub Actions 自动跑测试并构建、发布 Release。
 
 ## 使用
 
