@@ -35,6 +35,7 @@ jobs:
           npm run test:engine
           npm run test:taskmanager
           npm run test:ui
+          npm run test:login
 
       - name: 打包 exe
         run: npx electron-builder --config electron-builder.config.cjs --publish never

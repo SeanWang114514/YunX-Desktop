@@ -376,6 +376,33 @@ button.small {
   color: var(--accent);
 }
 
+/* ---------- 登录窗口状态条 ---------- */
+/* 登录窗口不会自动关闭，保存需要用户显式点击，因此常驻显示直到用户处理完 */
+.login-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(76, 139, 245, 0.12);
+  border: 1px solid rgba(76, 139, 245, 0.4);
+}
+
+.login-bar-text {
+  flex: 1 1 260px;
+  font-size: 13px;
+  color: #b3d0ff;
+}
+
+.login-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 /* ---------- 提示 ---------- */
 .alert {
   padding: 12px 14px;

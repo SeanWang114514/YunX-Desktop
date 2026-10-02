@@ -15,11 +15,12 @@
     "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
     "dist:portable": "npm run build && electron-builder --config electron-builder.config.cjs --win portable",
     "typecheck": "tsc -p tsconfig.main.json --noEmit",
-    "test": "npm run build && npm run test:adapters && npm run test:engine && npm run test:taskmanager && npm run test:ui",
+    "test": "npm run build && npm run test:adapters && npm run test:engine && npm run test:taskmanager && npm run test:ui && npm run test:login",
     "test:adapters": "node scripts/verify-adapters.cjs",
     "test:engine": "node scripts/verify-engine.cjs",
     "test:taskmanager": "electron scripts/verify-taskmanager.cjs",
-    "test:ui": "electron scripts/verify-ui.cjs"
+    "test:ui": "electron scripts/verify-ui.cjs",
+    "test:login": "electron scripts/verify-login.cjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

@@ -67,6 +67,15 @@ ipcMain.handle('sys:readClipboard', () => 'https://pan.quark.cn/s/abc123 提取�
 ipcMain.handle('sys:info', () => ({ version: '1.0.0' }));
 ipcMain.handle('auth:setCookie', () => ({ ok: true }));
 ipcMain.handle('auth:clear', () => ({ ok: true }));
+// 登录：openLogin 不再返回"已完成"，只表示窗口已打开
+ipcMain.handle('auth:openLogin', () => ({ ok: true, data: 'opened' }));
+let saveLoginCalls = 0;
+ipcMain.handle('auth:saveLoginCookies', () => {
+  saveLoginCalls++;
+  return { ok: true, data: { cookieCount: 7, credential: 'BDUSS=x; STOKEN=y' } };
+});
+ipcMain.handle('auth:closeLogin', () => ({ ok: true }));
+ipcMain.handle('auth:reloadLogin', () => ({ ok: true }));
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
@@ -141,7 +150,41 @@ app.whenReady().then(async () => {
     check('设置页渲染下载目录设置', st.includes('下载保存目录'));
     check('设置页显示关于信息', st.includes('AGPL-3.0'));
 
-    // 5) 解析错误路径：handler 返回业务错误 → 界面应显示错误且不卡在 loading
+    // 5) 登录流程：窗口不自动关闭，保存必须显式点击
+    await win.webContents.executeJavaScript(`document.querySelector('[data-tab="accounts"]').click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    const beforeLogin = await win.webContents.executeJavaScript(`document.getElementById('app').innerText`);
+    check('登录前无登录状态条', !beforeLogin.includes('登录窗口已打开'));
+
+    await win.webContents.executeJavaScript(`document.querySelector('[data-login="BAIDU"]').click()`);
+    await new Promise((r) => setTimeout(r, 900));
+    const bar = await win.webContents.executeJavaScript(`document.getElementById('app').innerText`);
+    check('点击登录后出现登录状态条', bar.includes('登录窗口已打开'));
+    check('状态条含「保存登录信息」按钮',
+      await win.webContents.executeJavaScript(`!!document.getElementById('btn-save-login')`));
+    check('状态条说明窗口不会自动关闭', bar.includes('不会自动关闭'));
+    check('关闭/重新加载按钮齐备',
+      await win.webContents.executeJavaScript(`!!document.getElementById('btn-close-login') && !!document.getElementById('btn-reload-login')`));
+
+    // 模拟主进程推送「检测到登录态」
+    await win.webContents.executeJavaScript(`
+      (() => { const s = document.querySelector('[data-save-login]'); return !!s; })()
+    `);
+    win.webContents.send('auth:loginDetected', 'BAIDU');
+    await new Promise((r) => setTimeout(r, 700));
+    const detected = await win.webContents.executeJavaScript(`document.getElementById('app').innerText`);
+    check('检测到登录态时提示可保存', detected.includes('检测到登录态'));
+
+    // 点击保存
+    const callsBefore = saveLoginCalls;
+    await win.webContents.executeJavaScript(`document.getElementById('btn-save-login').click()`);
+    await new Promise((r) => setTimeout(r, 1200));
+    check('点击保存会调用 auth:saveLoginCookies', saveLoginCalls === callsBefore + 1,
+      `calls ${callsBefore} -> ${saveLoginCalls}`);
+    const saved = await win.webContents.executeJavaScript(`document.getElementById('app').innerText`);
+    check('保存后提示已保存', saved.includes('已保存'));
+
+    // 6) 解析错误路径：handler 返回业务错误 → 界面应显示错误且不卡在 loading
     await win.webContents.executeJavaScript(`document.querySelector('[data-tab="resolve"]').click()`);
     await new Promise((r) => setTimeout(r, 400));
     await win.webContents.executeJavaScript(`(() => {

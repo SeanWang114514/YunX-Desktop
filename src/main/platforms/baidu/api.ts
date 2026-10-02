@@ -14,7 +14,8 @@ import type { DownloadLink, QuotaInfo, ShareFile, ShareSession } from '../../../
 import { BaiduConstants, BAIDU_TEMP_DIR, baiduErrnoMessage } from './constants';
 import type { PlatformAdapter, ResolveContext } from '../types';
 import { PlatformError } from '../types';
-import { hasCookie, mergeSetCookies } from '../../net/cookieJar';
+import { hasCookie, mergeSetCookies, cookieOrEmpty } from '../../net/cookieJar';
+import type { CookieLike } from '../../net/cookieJar';
 import { javaUrlEncode } from '../../util/crypto';
 
 /** 分享列表响应（xpan/share?method=list） */
@@ -77,7 +78,7 @@ class BaiduApi {
   }
 
   /** 每个适配器调用持有独立实例，这里保持与 Kotlin 一致的进程内缓存语义 */
-  async getBdstoken(cookie: string): Promise<string | null> {
+  async getBdstoken(cookie: CookieLike): Promise<string | null> {
     if (this.cachedBdstoken?.trim()) return this.cachedBdstoken;
     const result = await this.templateVariable(cookie, BaiduConstants.FIELDS_BDSTOKEN);
     const token = result ? String(result.bdstoken ?? '').trim() : '';
@@ -87,21 +88,22 @@ class BaiduApi {
   }
 
   /** 获取昵称（gettemplatevariable 的 username 字段）；失败返回 null */
-  async fetchNickname(cookie: string): Promise<string | null> {
+  async fetchNickname(cookie: CookieLike): Promise<string | null> {
     const result = await this.templateVariable(cookie, BaiduConstants.FIELDS_USERNAME);
     const name = result ? String(result.username ?? '').trim() : '';
     return name || null;
   }
 
   /** gettemplatevariable：errno==0 且 result 存在才算成功，任何异常 → null（非致命） */
-  private async templateVariable(cookie: string, fields: string): Promise<any | null> {    const url =
+  private async templateVariable(cookie: CookieLike, fields: string): Promise<any | null> {
+    const url =
       `${BaiduConstants.TEMPLATE_VARIABLE_URL}` +
       `?clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1` +
       `&fields=${urlEncode(fields)}`;
     try {
       const { json } = await this.req(url, {
         method: 'GET',
-        headers: { Cookie: cookie, 'User-Agent': BaiduConstants.UA_WEB },
+        headers: { Cookie: cookieOrEmpty(cookie), 'User-Agent': BaiduConstants.UA_WEB },
       });
       if (!json || Number(json.errno ?? -1) !== 0) return null;
       return json.result ?? null;
@@ -114,12 +116,12 @@ class BaiduApi {
    * 验证提取码：POST /share/verify，返回 randsk（URL 编码形式，直接作为 sekey 使用）。
    * Body 原样为 `pwd=<urlEncode(pwd)>&vcode_str=&vcode=`（空的 vcode_str/vcode 是字面量）。
    */
-  async verifyShare(surl: string, pwd: string, cookie: string): Promise<string> {
+  async verifyShare(surl: string, pwd: string, cookie: CookieLike): Promise<string> {
     const url = `${BaiduConstants.SHARE_VERIFY_URL}?surl=${urlEncode(surl)}`;
     const { json } = await this.req(url, {
       method: 'POST',
       headers: {
-        Cookie: cookie,
+        Cookie: cookieOrEmpty(cookie),
         'User-Agent': BaiduConstants.UA_WEB,
         Referer: `${BaiduConstants.SHARE_REFERER}${surl}`,
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -145,20 +147,27 @@ class BaiduApi {
     surl: string,
     sekey: string,
     dir: string,
-    cookie: string,
+    cookie: CookieLike,
     page = 1,
   ): Promise<BaiduShareList> {
-    const isRoot = dir.trim() === '' || dir === '/';
+    // 根目录判定：''、'/'、'0' 都视为根。
+    // '0' 是其它平台的 fid 约定（夸克/UC 用 '0' 表示根），上层 listFiles 会统一下发 '0'，
+    // 必须在这里归一化——否则 '0' 会被当成名为 "0" 的子目录，root=0 触发 errno=2。
+    const d = dir.trim();
+    const isRoot = d === '' || d === '/' || d === '0';
     const root = isRoot ? '1' : '0';
     const sekeyPart = sekey.trim() ? `&sekey=${sekey}` : '';
     const url =
       `${BaiduConstants.SHARE_LIST_URL}` +
       `&shorturl=${surl}&page=${page}&num=${BaiduConstants.PAGE_SIZE}&root=${root}` +
-      `&dir=${urlEncode(dir.trim() === '' ? '/' : dir)}` +
+      `&dir=${urlEncode(isRoot ? '/' : d)}` +
       sekeyPart;
     // 子目录(root=0)必须携带 BDCLND（= verify 的 randsk），否则 errno=2；顶层(root=1)无需
+    // credential 可能为 null（匿名浏览），hasCookie 已容忍 null
     const authCookie =
-      sekey.trim() && !cookie.includes('BDCLND=') ? `${cookie}; BDCLND=${sekey}` : cookie;
+      sekey.trim() && !hasCookie(cookie, 'BDCLND')
+        ? `${cookieOrEmpty(cookie)}; BDCLND=${sekey}`
+        : cookieOrEmpty(cookie);
 
     const { json } = await this.req(url, {
       method: 'GET',
@@ -202,7 +211,7 @@ class BaiduApi {
   }
 
   /** 确保临时转存目录存在：已存在则复用，不存在则创建，创建失败回退根目录（鲁棒性） */
-  async ensureTempDir(cookie: string): Promise<string> {
+  async ensureTempDir(cookie: CookieLike): Promise<string> {
     try {
       const exists = (await this.listDir('/', cookie)).includes(BAIDU_TEMP_DIR);
       const ok = exists || (await this.createDir(BAIDU_TEMP_DIR, cookie));
@@ -213,7 +222,7 @@ class BaiduApi {
   }
 
   /** 列出个人网盘目录（检查临时转存目录是否存在），返回子项 path 集合 */
-  async listDir(dir: string, cookie: string): Promise<string[]> {
+  async listDir(dir: string, cookie: CookieLike): Promise<string[]> {
     const url =
       `${BaiduConstants.CLOUD_LIST_URL}` +
       `?clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1&order=time&desc=1` +
@@ -221,7 +230,7 @@ class BaiduApi {
     try {
       const { json } = await this.req(url, {
         method: 'GET',
-        headers: { Cookie: cookie, 'User-Agent': BaiduConstants.UA_NETDISK },
+        headers: { Cookie: cookieOrEmpty(cookie), 'User-Agent': BaiduConstants.UA_NETDISK },
       });
       if (!json || Number(json.errno ?? -1) !== 0) return [];
       const arr: any[] = Array.isArray(json.list) ? json.list : [];
@@ -232,7 +241,7 @@ class BaiduApi {
   }
 
   /** 创建目录（个人网盘路径），返回是否成功 */
-  async createDir(path: string, cookie: string): Promise<boolean> {
+  async createDir(path: string, cookie: CookieLike): Promise<boolean> {
     const bdstoken = await this.getBdstoken(cookie);
     if (!bdstoken) return false;
     // body 字面量含空的 size 与写死的 block_list=%5B%5D（对齐抓包）
@@ -244,7 +253,7 @@ class BaiduApi {
       const { json } = await this.req(url, {
         method: 'POST',
         headers: {
-          Cookie: cookie,
+          Cookie: cookieOrEmpty(cookie),
           'User-Agent': BaiduConstants.UA_NETDISK,
           Referer: BaiduConstants.DISK_REFERER,
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -264,7 +273,7 @@ class BaiduApi {
     sekey: string,
     fsId: string,
     toDir: string,
-    cookie: string,
+    cookie: CookieLike,
   ): Promise<BaiduTransferResult> {
     const bdstoken = await this.getBdstoken(cookie);
     if (!bdstoken) throw new PlatformError('获取 bdstoken 失败，请重新登录');
@@ -275,7 +284,9 @@ class BaiduApi {
     const body = `fsidlist=%5B%22${fsId}%22%5D&path=${urlEncode(toDir)}`;
     // verify 响应会 Set-Cookie: BDCLND=<randsk>，transfer 必须携带（分享验证标识），
     // 缺失会 errno=2；BDCLND 值即 sekey（randsk），手动补齐
-    const authCookie = cookie.includes('BDCLND=') ? cookie : `${cookie}; BDCLND=${sekey}`;
+    const authCookie = hasCookie(cookie, 'BDCLND')
+      ? cookieOrEmpty(cookie)
+      : `${cookieOrEmpty(cookie)}; BDCLND=${sekey}`;
 
     const { json } = await this.req(url, {
       method: 'POST',
@@ -306,7 +317,7 @@ class BaiduApi {
    *  - rank2+ 为 appallNN.baidupcs.com（encrypt=0 明文通道，可直接 Range 下载）
    * 仅需 BDUSS 登录态 + 手机 UA；psign 为写死常量，rand/devuid 复用抓包常量即可。
    */
-  async locateDownload(path: string, cookie: string): Promise<string> {
+  async locateDownload(path: string, cookie: CookieLike): Promise<string> {
     const time = Math.floor(Date.now() / 1000);
     const url =
       `${BaiduConstants.LOCATE_DOWNLOAD_URL}` +
@@ -328,7 +339,7 @@ class BaiduApi {
     const { json } = await this.req(url, {
       method: 'POST',
       headers: {
-        Cookie: cookie,
+        Cookie: cookieOrEmpty(cookie),
         'User-Agent': BaiduConstants.UA_NETDISK,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -355,7 +366,7 @@ class BaiduApi {
   }
 
   /** 删除个人网盘文件（转存后清理），按完整路径删除 */
-  async deleteFile(path: string, cookie: string): Promise<boolean> {
+  async deleteFile(path: string, cookie: CookieLike): Promise<boolean> {
     const bdstoken = await this.getBdstoken(cookie);
     if (!bdstoken) return false;
     const body = `filelist=${urlEncode(`["${path}"]`)}`;
@@ -366,7 +377,7 @@ class BaiduApi {
       const { json } = await this.req(url, {
         method: 'POST',
         headers: {
-          Cookie: cookie,
+          Cookie: cookieOrEmpty(cookie),
           'User-Agent': BaiduConstants.UA_NETDISK,
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         },
@@ -379,7 +390,7 @@ class BaiduApi {
   }
 
   /** 网盘空间详情（yun.baidu.com/api/quota：total / used） */
-  async getQuota(cookie: string): Promise<QuotaInfo | null> {
+  async getQuota(cookie: CookieLike): Promise<QuotaInfo | null> {
     const url =
       `${BaiduConstants.QUOTA_URL}?clienttype=0&app_id=${BaiduConstants.APP_ID}` +
       `&web=1&channel=chunlei&version=${Date.now()}`;
@@ -387,7 +398,7 @@ class BaiduApi {
       const { json } = await this.req(url, {
         method: 'GET',
         headers: {
-          Cookie: cookie,
+          Cookie: cookieOrEmpty(cookie),
           'User-Agent': BaiduConstants.UA_NETDISK,
           'X-Requested-With': 'XMLHttpRequest',
           Referer: BaiduConstants.DISK_REFERER,
@@ -413,7 +424,7 @@ class BaiduApi {
  * 删除转存文件（失败不阻断）；转存在临时目录时，删完文件后尝试删空目录。
  * 对齐 Kotlin BaiduResolveRepository.deleteTransferred（两处 runCatching 均吞掉异常）。
  */
-async function deleteTransferred(api: BaiduApi, path: string, credential: string): Promise<void> {
+async function deleteTransferred(api: BaiduApi, path: string, credential: CookieLike): Promise<void> {
   try {
     await api.deleteFile(path, credential);
   } catch {

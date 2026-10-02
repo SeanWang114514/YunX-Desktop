@@ -49,6 +49,22 @@ const api = {
       ipcRenderer.invoke('auth:verify', platform, credential),
     openLogin: (platform: string, url: string) =>
       ipcRenderer.invoke('auth:openLogin', platform, url),
+    /** 保存登录窗口里的 Cookie（由界面「保存登录信息」按钮触发） */
+    saveLoginCookies: (platform: string) =>
+      ipcRenderer.invoke('auth:saveLoginCookies', platform),
+    closeLogin: () => ipcRenderer.invoke('auth:closeLogin'),
+    reloadLogin: (url?: string) => ipcRenderer.invoke('auth:reloadLogin', url),
+    /** 登录窗口内检测到登录态（仅提示，不自动保存） */
+    onLoginDetected: (cb: (platform: string) => void) => {
+      const h = (_e: unknown, p: string) => cb(p);
+      ipcRenderer.on('auth:loginDetected', h);
+      return () => ipcRenderer.removeListener('auth:loginDetected', h);
+    },
+    onLoginWindowClosed: (cb: (platform: string) => void) => {
+      const h = (_e: unknown, p: string) => cb(p);
+      ipcRenderer.on('auth:loginWindowClosed', h);
+      return () => ipcRenderer.removeListener('auth:loginWindowClosed', h);
+    },
     xunleiLogin: (username: string, password: string) =>
       ipcRenderer.invoke('auth:xunleiLogin', username, password),
   },

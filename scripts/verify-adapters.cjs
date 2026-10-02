@@ -248,6 +248,87 @@ function makeCtx(port, base) {
     server.close();
   }
 
+  // ---------- 用例：百度 —— 匿名列出分享（root 归一化 + null 凭据）----------
+  // 回归两个真实 bug：
+  //  1) 界面传 dirFid='0'（其它平台的根约定），百度若原样透传会被当成名为 "0"
+  //     的子目录，root=0 触发 errno=2「链接出错了」；
+  //  2) 匿名浏览时 credential 为 null，早期代码直接 cookie.includes() 崩溃。
+  {
+    const captured = {};
+    const server = await startServer((req, res) => {
+      const u = new URL(req.url, 'http://x');
+      const p = u.pathname + u.search;
+      captured[p.split('&')[0]] = { url: u, headers: req.headers };
+
+      if (u.pathname.includes('/share/verify')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ errno: 0, randsk: 'Randsk%2FEncoded%3D' }));
+        return;
+      }
+      if (u.pathname.includes('/xpan/share')) {
+        const root = u.searchParams.get('root');
+        const dir = u.searchParams.get('dir');
+        // 模拟真实服务端语义：root=0 且 dir 不是真实子目录路径 → errno=2
+        const isRealSubdir = dir && dir !== '/' && dir !== '0';
+        if (root === '0' && !isRealSubdir) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ errno: 2, err_msg: '啊哦，链接出错了' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            errno: 0,
+            title: '/test',
+            share_id: '12345',
+            uk: '67890',
+            list: [
+              {
+                category: '6',
+                fs_id: '111',
+                isdir: '1',
+                path: '/folder',
+                server_filename: 'folder',
+                size: '0',
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end('{}');
+    });
+    const port = server.address().port;
+    const { baiduAdapter } = require(path.join(DIST, 'platforms', 'baidu', 'api.js'));
+    const ctx = makeCtx(port, 'https://pan.baidu.com');
+
+    // 匿名：credential = null（这正是之前崩溃的路径）
+    const session = await baiduAdapter.createSession('Q5u5NSrb0gL5-psA9DCBUQ', '5nox', null, ctx);
+    check('baidu 匿名可创建会话（不为 null 崩）', !!session && !!session.stoken);
+
+    const rootFiles = await baiduAdapter.listFiles(session, '0', null, ctx);
+    check('baidu 根目录 root=1 归一化成功（不再 errno=2）', rootFiles.length === 1,
+      `files=${rootFiles.length}`);
+
+    const listReq = captured['/rest/2.0/xpan/share?method=list'];
+    check('baidu 根目录请求 root=1', listReq && listReq.url.searchParams.get('root') === '1',
+      listReq && listReq.url.searchParams.get('root'));
+    check('baidu 根目录 dir 归一化为 "/"',
+      listReq && listReq.url.searchParams.get('dir') === '/',
+      listReq && listReq.url.searchParams.get('dir'));
+    check('baidu 匿名时 Cookie 头为 BDCLND（无 null 字符串）',
+      listReq && /BDCLND=/.test(listReq.headers.cookie || '') &&
+        !/null/.test(listReq.headers.cookie || ''),
+      listReq && listReq.headers.cookie);
+
+    // 目录项映射：isdir 必须是布尔 true，fid 用 path
+    check('baidu 目录项 isdir=true', rootFiles[0].isdir === true);
+    check('baidu 目录项 fid 取 path', rootFiles[0].fid === '/folder', rootFiles[0].fid);
+
+    server.close();
+  }
+
   console.log('\n===== SUMMARY =====');
   const failed = results.filter((r) => !r.ok);
   console.log(`${results.length - failed.length}/${results.length} passed`);

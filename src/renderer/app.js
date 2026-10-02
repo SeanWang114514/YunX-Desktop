@@ -20,6 +20,12 @@ const state = {
   },
   tasks: [],
   settings: { downloadDir: '', concurrency: 16 },
+  /**
+   * 登录窗口状态。窗口不会自动关闭，用户需要显式点「保存登录信息」。
+   * detected: 已在窗口会话里检测到登录 Cookie（仅提示）
+   * saved:    已成功写入凭据
+   */
+  login: { platform: '', detected: false, saved: false },
   toast: '',
 };
 
@@ -311,9 +317,32 @@ function renderDownload() {
 /* ---------- 渲染：账号页 ---------- */
 function renderAccounts() {
   let html = '<div class="panel">';
+
+  // 登录窗口状态条：窗口不会自动关闭，保存必须由用户点击触发
+  if (state.login.platform) {
+    const LP = PLATFORM_LABELS[state.login.platform] || state.login.platform;
+    const tip = state.login.saved
+      ? '✅ 已保存，可以关闭登录窗口了。'
+      : state.login.detected
+        ? '🔔 检测到登录态，点右侧「保存登录信息」写入。'
+        : '请在登录窗口中完成登录（可能需扫码或短信验证）。登录窗口不会自动关闭。';
+    html += `
+      <div class="login-bar">
+        <div class="login-bar-text">
+          <b>登录窗口已打开：${esc(LP)}</b>
+          <div class="hint" style="margin-top:4px">${esc(tip)}</div>
+        </div>
+        <div class="login-bar-actions">
+          <button class="primary" data-save-login="${state.login.platform}" id="btn-save-login">保存登录信息</button>
+          <button data-reload-login="${state.login.platform}" id="btn-reload-login">重新加载</button>
+          <button id="btn-close-login">关闭窗口</button>
+        </div>
+      </div>`;
+  }
+
   html += `<div class="card"><div class="card-title">👤 网盘账号</div>
-    <div class="hint" style="margin-bottom:14px">点击「登录」会打开对应网盘官网，登录成功后自动提取 Cookie。
-    凭据使用系统 DPAPI 加密保存在本机。</div>
+    <div class="hint" style="margin-bottom:14px">点击「登录」打开对应网盘官网，完成登录后回到本页点<b>「保存登录信息」</b>。
+    登录窗口<b>不会自动关闭</b>，方便你处理扫码/短信验证。凭据使用系统 DPAPI 加密保存在本机。</div>
     <div class="grid-2">`;
 
   for (const p of state.platforms) {
@@ -497,20 +526,58 @@ function bindEvents() {
   document.querySelectorAll('[data-login]').forEach((el) => {
     el.onclick = async () => {
       const platform = el.dataset.login;
-      toast('请在打开的窗口中登录…');
       const res = await safeCall(
         () => api.auth.openLogin(platform, LOGIN_URLS[platform] || 'about:blank'),
-        '登录失败',
+        '打开登录窗口失败',
       );
       if (res.ok) {
-        await loadPlatforms();
-        toast('登录成功，Cookie 已保存', 'success');
+        state.login = { platform, detected: false, saved: false };
+        toast('已打开登录窗口。登录完成后点「保存登录信息」即可。');
         render();
       } else {
-        toast(`登录未完成：${res.error}`, 'error');
+        toast(`无法打开登录窗口：${res.error}`, 'error');
       }
     };
   });
+
+  // 登录窗口内检测到登录态 → 只做提示，等待用户点保存
+  const btnSaveLogin = document.getElementById('btn-save-login');
+  if (btnSaveLogin) {
+    btnSaveLogin.onclick = async () => {
+      const platform = btnSaveLogin.dataset.saveLogin;
+      if (!platform) return;
+      const res = await safeCall(() => api.auth.saveLoginCookies(platform), '保存登录信息失败');
+      if (res.ok) {
+        state.login.saved = true;
+        await loadPlatforms();
+        toast(`已保存登录信息（${res.data.cookieCount} 项 Cookie）`, 'success');
+        render();
+      } else {
+        toast(res.error, 'error');
+      }
+    };
+  }
+
+  const btnCloseLogin = document.getElementById('btn-close-login');
+  if (btnCloseLogin) {
+    btnCloseLogin.onclick = async () => {
+      await safeCall(() => api.auth.closeLogin(), '关闭登录窗口失败');
+      state.login = { platform: '', detected: false, saved: false };
+      render();
+    };
+  }
+
+  const btnReloadLogin = document.getElementById('btn-reload-login');
+  if (btnReloadLogin) {
+    btnReloadLogin.onclick = async () => {
+      const p = btnReloadLogin.dataset.reloadLogin;
+      const res = await safeCall(
+        () => api.auth.reloadLogin(LOGIN_URLS[p] || undefined),
+        '重新加载失败',
+      );
+      if (!res.ok) toast(res.error, 'error');
+    };
+  }
 
   document.querySelectorAll('[data-manual]').forEach((el) => {
     el.onclick = async () => {
@@ -597,11 +664,40 @@ const LOGIN_URLS = {
   PAN123: 'https://www.123pan.com/',
 };
 
+/** 平台中文名（渲染层本地副本，避免额外 IPC 往返） */
+const PLATFORM_LABELS = {
+  QUARK: '夸克网盘',
+  UC: 'UC 网盘',
+  BAIDU: '百度网盘',
+  C139: '139 网盘',
+  XUNLEI: '迅雷网盘',
+  PAN123: '123 云盘',
+};
+
 /* ---------- 启动 ---------- */
 async function boot() {
   await loadPlatforms();
   await refreshTasks();
   await loadSettings();
+
+  // 登录窗口事件：检测到登录态只提示，保存必须用户点击
+  if (api.auth.onLoginDetected) {
+    api.auth.onLoginDetected((platform) => {
+      if (state.login.platform === platform && !state.login.detected) {
+        state.login.detected = true;
+        if (state.tab === 'accounts') render();
+      }
+    });
+  }
+  if (api.auth.onLoginWindowClosed) {
+    api.auth.onLoginWindowClosed((platform) => {
+      if (state.login.platform === platform && !state.login.saved) {
+        toast('登录窗口已关闭，若已完成登录请重新打开并点「保存登录信息」');
+      }
+      state.login.platform = '';
+      if (state.tab === 'accounts') render();
+    });
+  }
 
   api.download.onProgress((t) => {
     const i = state.tasks.findIndex((x) => x.id === t.id);
