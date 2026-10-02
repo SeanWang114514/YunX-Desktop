@@ -1,0 +1,31 @@
+{
+  "name": "yunx-desktop",
+  "version": "1.0.0",
+  "description": "云析 YunX 桌面版 —— 粘贴分享链接，直接高速下载（Electron 重写版）",
+  "main": "dist/main/main.js",
+  "author": "YunX Desktop Port",
+  "license": "AGPL-3.0",
+  "private": true,
+  "scripts": {
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "dev": "npm run build && electron .",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "dist:portable": "npm run build && electron-builder --config electron-builder.config.cjs --win portable",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit",
+    "test": "npm run build && npm run test:adapters && npm run test:engine && npm run test:taskmanager && npm run test:ui",
+    "test:adapters": "node scripts/verify-adapters.cjs",
+    "test:engine": "node scripts/verify-engine.cjs",
+    "test:taskmanager": "electron scripts/verify-taskmanager.cjs",
+    "test:ui": "electron scripts/verify-ui.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  }
+}

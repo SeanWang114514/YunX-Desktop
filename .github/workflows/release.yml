@@ -1,0 +1,80 @@
+name: Build Windows Release
+
+# 推送 tag（如 v1.0.0）时自动构建 Windows 安装包与便携版，并创建 Release
+on:
+  push:
+    tags:
+      - 'v*'
+  # 允许在 Actions 页面手动触发（产物作为 Artifact 上传，不创建 Release）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 运行测试
+        run: |
+          npm run build
+          npm run test:adapters
+          npm run test:engine
+          npm run test:taskmanager
+          npm run test:ui
+
+      - name: 打包 exe
+        run: npx electron-builder --config electron-builder.config.cjs --publish never
+
+      - name: 上传构建产物（手动触发时）
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: yunx-desktop-windows
+          path: release/*.exe
+          retention-days: 14
+
+      - name: 创建 Release 并上传 exe
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release/*.exe
+          draft: false
+          generate_release_notes: true
+          body: |
+            ## 云析 YunX 桌面版 ${{ github.ref_name }}
+
+            Windows x64 桌面版，移植自 [CYQawa/YunX](https://github.com/CYQawa/YunX)（AGPL-3.0）。
+
+            ### 下载
+
+            | 文件 | 说明 |
+            |---|---|
+            | `YunX-Desktop-*-Setup.exe` | NSIS 安装包，可选安装目录、自动创建快捷方式 |
+            | `YunX-Desktop-*-Portable.exe` | 单文件便携版，双击即用，无需安装 |
+
+            > 未做代码签名，Windows SmartScreen 可能提示"未知发布者"，选择"仍要运行"即可。
+
+            ### 支持平台
+
+            夸克 / UC / 迅雷 / 百度 / 139 / 123 云盘
+
+            其中百度 / 139 / 123 未登录也可浏览分享列表，获取下载直链需要登录。
+
+            ### 校验
+
+            本 Release 由 CI 从对应 tag 的源码构建，构建前已通过类型检查与 89 项测试
+            （协议 mock 17 + 下载引擎 27 + 任务调度 21 + 界面 24）。

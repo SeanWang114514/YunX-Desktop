@@ -1,0 +1,19 @@
+node_modules/
+dist/
+release/
+.ebcache/
+
+# 原项目克隆（用于对照移植，不纳入本仓库）
+repo/
+
+# 验证产物
+*.log
+screenshot.png
+ui-*.png
+tab-*.png
+packaged-ui.png
+scripts/dbg*.cjs
+
+# 提交信息临时文件
+commitmsg.tmp
+.git-commit-msg.txt
