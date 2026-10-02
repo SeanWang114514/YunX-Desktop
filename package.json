@@ -1,6 +1,6 @@
 {
   "name": "yunx-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "云析 YunX 桌面版 —— 粘贴分享链接，直接高速下载（Electron 重写版）",
   "main": "dist/main/main.js",
   "author": "YunX Desktop Port",
