@@ -5,19 +5,26 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, clipboard, session } from 'electron';
 import { join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
-import { CredentialStore } from './store/credentialStore';
-import { ResolveService } from './resolve/resolveService';
-import { TaskManager } from './download/taskManager';
-import { ALL_ADAPTERS, getAdapter } from './platforms';
-import { LogCollector } from './util/logCollector';
+import { CredentialStore } from './store/credentialStore.js';
+import { ResolveService } from './resolve/resolveService.js';
+import { TaskManager } from './download/taskManager.js';
+import { UploadManager } from './upload/uploadManager.js';
+import { createBaiduAuthorizeUrl, parseBaiduOAuthCallback, exchangeBaiduCode, refreshBaiduToken } from './upload/baiduOAuth.js';
+import { ALL_ADAPTERS, getAdapter } from './platforms/index.js';
+import { LogCollector } from './util/logCollector.js';
 import type { SharePlatform, ShareFile, DownloadLink } from '../shared/types';
-import { PLATFORM_LABELS } from '../shared/linkParser';
+import { PLATFORM_LABELS } from '../shared/linkParser.js';
 
 let mainWindow: BrowserWindow | null = null;
 let store: CredentialStore;
 let resolveService: ResolveService;
 let taskManager: TaskManager;
+let uploadManager: UploadManager;
 let logger: LogCollector;
+
+/** 百度 OAuth 授权窗口与一次性 state */
+let baiduOAuthWindow: BrowserWindow | null = null;
+let pendingBaiduOAuthState = '';
 
 /** 登录窗口（WebView 式 Cookie 获取） */
 let loginWindow: BrowserWindow | null = null;
@@ -44,7 +51,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 620,
     title: '云析 YunX 桌面版',
-    backgroundColor: '#0f1115',
+    backgroundColor: '#f9f9ff',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
@@ -207,6 +214,123 @@ function registerIpc(): void {
     if (res.canceled || res.filePaths.length === 0) return { ok: false };
     return { ok: true, data: res.filePaths[0] };
   });
+
+  // ---------- 本地文件上传 ----------
+  ipcMain.handle('upload:pickFiles', async () => {
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile', 'multiSelections'],
+      title: '选择要上传的文件',
+    });
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, data: [] };
+    try {
+      const files = await uploadManager.grantFiles(res.filePaths);
+      return { ok: true, data: files };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e), data: [] };
+    }
+  });
+  ipcMain.handle('upload:grantDroppedFile', async (_e, filePath: unknown) => {
+    try {
+      if (typeof filePath !== 'string' || !filePath.trim() || filePath.length > 4096) throw new Error('拖放文件路径无效');
+      const [file] = await uploadManager.grantFiles([filePath]);
+      return { ok: true, data: file };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  });
+  ipcMain.handle('upload:list', () => uploadManager.list());
+  ipcMain.handle('upload:add', async (_e, files: unknown, platform: unknown) => {
+    try {
+      if (!Array.isArray(files) || files.length < 1 || files.length > 100) {
+        throw new Error('一次只能选择 1-100 个文件');
+      }
+      const normalized = files.map((item) => {
+        if (!item || typeof item !== 'object') throw new Error('上传文件参数无效');
+        const value = item as { fileToken?: unknown; fileName?: unknown };
+        const fileToken = typeof value.fileToken === 'string' ? value.fileToken.trim() : '';
+        const fileName = value.fileName == null ? undefined : String(value.fileName);
+        if (!fileToken || fileToken.length > 128) throw new Error('文件选择凭证无效');
+        if (fileName !== undefined && fileName.length > 240) throw new Error('目标文件名过长');
+        return { fileToken, fileName };
+      });
+      const tasks = await uploadManager.createFromGrants(normalized, String(platform) as SharePlatform);
+      return { ok: true, data: tasks };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  });
+  ipcMain.handle('upload:cancel', (_e, id: string) => { uploadManager.cancel(id); return { ok: true }; });
+  ipcMain.handle('upload:remove', (_e, id: string) => { uploadManager.remove(id); return { ok: true }; });
+
+  ipcMain.handle('auth:baiduOAuthStatus', () => {
+    const record = store.canUseSecureOAuth() ? store.getBaiduOAuth() : null;
+    return {
+      secureStorage: store.canUseSecureOAuth(),
+      configured: !!record?.config.appKey,
+      authorized: !!record?.tokens?.accessToken,
+      appName: record?.config.appName,
+    };
+  });
+  ipcMain.handle('auth:saveBaiduOAuthConfig', (_e, config: any) => {
+    try {
+      if (!store.canUseSecureOAuth()) throw new Error('系统安全存储不可用，无法保存百度 OAuth 密钥');
+      const normalized = {
+        appKey: String(config?.appKey ?? '').trim(),
+        appSecret: String(config?.appSecret ?? '').trim(),
+        appName: String(config?.appName ?? '').trim(),
+        redirectUri: String(config?.redirectUri ?? 'oob').trim() || 'oob',
+      };
+      if (!normalized.appKey || normalized.appKey.length > 256 || !normalized.appSecret || normalized.appSecret.length > 512 || !/^[A-Za-z0-9_-]{1,64}$/.test(normalized.appName)) {
+        throw new Error('AppKey、Secret 或应用名称格式无效');
+      }
+      if (normalized.redirectUri !== 'oob') throw new Error('当前版本仅支持百度 OAuth OOB 回调 redirect_uri=oob');
+      store.saveBaiduOAuth(normalized);
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+  });
+  ipcMain.handle('auth:startBaiduOAuth', async () => {
+    try {
+      const record = store.getBaiduOAuth();
+      if (!store.canUseSecureOAuth() || !record) throw new Error('请先配置百度开放平台 AppKey/Secret，并确保系统安全存储可用');
+      if (record.config.redirectUri !== 'oob') throw new Error('当前版本仅支持百度 OAuth OOB 回调 redirect_uri=oob');
+      if (baiduOAuthWindow && !baiduOAuthWindow.isDestroyed()) baiduOAuthWindow.close();
+      const auth = createBaiduAuthorizeUrl({ ...record.config, redirectUri: record.config.redirectUri || 'oob' });
+      const oauthRevision = store.getBaiduOAuthRevision();
+      pendingBaiduOAuthState = auth.state;
+      baiduOAuthWindow = new BrowserWindow({ width: 960, height: 720, title: '授权百度网盘上传', parent: mainWindow ?? undefined, webPreferences: { contextIsolation: true, nodeIntegration: false } });
+      const oauthWindow = baiduOAuthWindow;
+      const capture = async (target: string) => {
+        if (!target.startsWith('http://openapi.baidu.com/oauth/2.0/login_success')) return;
+        if (oauthWindow !== baiduOAuthWindow) return;
+        try {
+          const code = parseBaiduOAuthCallback(target, auth.state);
+          if (pendingBaiduOAuthState === auth.state) pendingBaiduOAuthState = '';
+          const tokens = await exchangeBaiduCode(record.config, code);
+          if (!store.saveBaiduOAuthIfCurrent(record.config, tokens, oauthRevision)) {
+            throw new Error('百度 OAuth 配置已在授权期间变更，请重新授权');
+          }
+          oauthWindow.close();
+          mainWindow?.webContents.send('auth:baiduOAuthChanged');
+        } catch (error: any) {
+          logger.error(`百度 OAuth 授权失败: ${error?.message}`);
+        }
+      };
+      oauthWindow.webContents.on('will-redirect', (event, url) => {
+        if (url.startsWith('http://openapi.baidu.com/oauth/2.0/login_success')) { event.preventDefault(); void capture(url); }
+      });
+      oauthWindow.webContents.on('will-navigate', (event, url) => {
+        if (url.startsWith('http://openapi.baidu.com/oauth/2.0/login_success')) { event.preventDefault(); void capture(url); }
+      });
+      oauthWindow.on('closed', () => {
+        if (baiduOAuthWindow !== oauthWindow) return;
+        baiduOAuthWindow = null;
+        pendingBaiduOAuthState = '';
+      });
+      await oauthWindow.loadURL(auth.url);
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+  });
+  ipcMain.handle('auth:clearBaiduOAuth', () => { store.clearBaiduOAuth(); mainWindow?.webContents.send('auth:baiduOAuthChanged'); return { ok: true }; });
 
   // ---------- 登录 ----------
   ipcMain.handle('auth:list', () => store.listAuth());
@@ -412,6 +536,26 @@ app.whenReady().then(() => {
     concurrency: store.getSetting<number>('concurrency', 16),
   });
 
+  uploadManager = new UploadManager({
+    secureOAuth: () => store.canUseSecureOAuth(),
+    getBaiduOAuth: () => {
+      const record = store.getBaiduOAuth();
+      if (!record) return null;
+      return { config: { appName: record.config.appName }, tokens: record.tokens };
+    },
+    refreshBaiduOAuth: async () => {
+      const record = store.getBaiduOAuth();
+      if (!record?.tokens?.refreshToken) return null;
+      const revision = store.getBaiduOAuthRevision();
+      const tokens = await refreshBaiduToken(record.config, record.tokens.refreshToken);
+      // 刷新期间用户可能已清除或重新配置 OAuth：代际变化时丢弃结果，避免复活已清除的凭据
+      if (!store.saveBaiduOAuthIfCurrent(record.config, tokens, revision)) {
+        throw new Error('百度 OAuth 配置已在刷新期间变更，请重新授权');
+      }
+      return { config: { appName: record.config.appName }, tokens };
+    },
+  });
+
   // 转发任务事件到渲染进程
   taskManager.on('progress', (t) => mainWindow?.webContents.send('download:progress', t));
   taskManager.on('done', async (t) => {
@@ -422,6 +566,9 @@ app.whenReady().then(() => {
     }
   });
   taskManager.on('error', (t) => mainWindow?.webContents.send('download:error', t));
+  uploadManager.on('progress', (t) => mainWindow?.webContents.send('upload:progress', t));
+  uploadManager.on('done', (t) => mainWindow?.webContents.send('upload:done', t));
+  uploadManager.on('error', (t) => mainWindow?.webContents.send('upload:error', t));
 
   registerIpc();
   createWindow();

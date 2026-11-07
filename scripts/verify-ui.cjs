@@ -107,12 +107,16 @@ app.whenReady().then(async () => {
         hasApp: !!app,
         text: app ? app.innerText : '',
         tabs: [...document.querySelectorAll('[data-tab]')].map(t => t.dataset.tab),
-        title: document.querySelector('.logo')?.textContent || '',
+        title: document.querySelector('.top-bar-title')?.textContent || '',
+        active: document.querySelector('.rail-item.active')?.dataset.tab || '',
       };
     })()`);
     check('渲染层挂载了 #app', initial.hasApp);
-    check('标题显示「云析 YunX」', initial.title.includes('云析'), initial.title);
-    check('四个 tab 均存在', JSON.stringify(initial.tabs) === JSON.stringify(['resolve', 'download', 'accounts', 'settings']), initial.tabs.join(','));
+    check('顶栏标题显示当前页「解析」', initial.title === '解析', initial.title);
+    check('左侧导航为 解析 / 账号 / 下载 / 上传 / 设置',
+      JSON.stringify(initial.tabs) === JSON.stringify(['resolve', 'accounts', 'download', 'upload', 'settings']),
+      initial.tabs.join(','));
+    check('默认选中解析页', initial.active === 'resolve', initial.active);
     check('解析页显示粘贴提示', initial.text.includes('粘贴分享链接'));
     check('解析页列出支持平台',
       initial.text.includes('夸克') && initial.text.includes('123 云盘'),

@@ -1,10 +1,15 @@
 node_modules/
 dist/
 release/
+release-new/
 .ebcache/
 
 # 原项目克隆（用于对照移植，不纳入本仓库）
 repo/
+
+# UI 比对工具与截图（本地验证用，不入库）
+.uicheck/
+electron-rt/
 
 # 验证产物
 *.log

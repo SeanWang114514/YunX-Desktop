@@ -2,7 +2,7 @@
  * YunX Desktop (云析桌面版) —— 预加载脚本：暴露受限的 IPC API 给渲染进程。
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const api = {
   platform: {
@@ -34,6 +34,19 @@ const api = {
       ipcRenderer.on('download:progress', (_e, t) => cb(t)),
     onDone: (cb: (t: unknown) => void) => ipcRenderer.on('download:done', (_e, t) => cb(t)),
     onError: (cb: (t: unknown) => void) => ipcRenderer.on('download:error', (_e, t) => cb(t)),
+  },
+  upload: {
+    pickFiles: () => ipcRenderer.invoke('upload:pickFiles'),
+    grantDroppedFile: (file: Parameters<typeof webUtils.getPathForFile>[0]) =>
+      ipcRenderer.invoke('upload:grantDroppedFile', webUtils.getPathForFile(file)),
+    list: () => ipcRenderer.invoke('upload:list'),
+    add: (files: Array<{ fileToken: string; fileName?: string }>, platform: string) =>
+      ipcRenderer.invoke('upload:add', files, platform),
+    cancel: (id: string) => ipcRenderer.invoke('upload:cancel', id),
+    remove: (id: string) => ipcRenderer.invoke('upload:remove', id),
+    onProgress: (cb: (t: unknown) => void) => ipcRenderer.on('upload:progress', (_e, t) => cb(t)),
+    onDone: (cb: (t: unknown) => void) => ipcRenderer.on('upload:done', (_e, t) => cb(t)),
+    onError: (cb: (t: unknown) => void) => ipcRenderer.on('upload:error', (_e, t) => cb(t)),
   },
   settings: {
     get: (key: string, fallback: unknown) => ipcRenderer.invoke('settings:get', key, fallback),
@@ -67,6 +80,15 @@ const api = {
     },
     xunleiLogin: (username: string, password: string) =>
       ipcRenderer.invoke('auth:xunleiLogin', username, password),
+    baiduOAuthStatus: () => ipcRenderer.invoke('auth:baiduOAuthStatus'),
+    saveBaiduOAuthConfig: (config: unknown) => ipcRenderer.invoke('auth:saveBaiduOAuthConfig', config),
+    startBaiduOAuth: () => ipcRenderer.invoke('auth:startBaiduOAuth'),
+    clearBaiduOAuth: () => ipcRenderer.invoke('auth:clearBaiduOAuth'),
+    onBaiduOAuthChanged: (cb: () => void) => {
+      const h = () => cb();
+      ipcRenderer.on('auth:baiduOAuthChanged', h);
+      return () => ipcRenderer.removeListener('auth:baiduOAuthChanged', h);
+    },
   },
   sys: {
     readClipboard: () => ipcRenderer.invoke('sys:readClipboard'),

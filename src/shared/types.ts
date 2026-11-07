@@ -92,3 +92,44 @@ export interface AuthState {
   nickname?: string;
   updatedAt: number;
 }
+
+/** 百度开放平台 OAuth 应用配置（密钥只在主进程使用） */
+export interface BaiduOAuthConfig {
+  appKey: string;
+  appSecret: string;
+  appName: string;
+  redirectUri: string;
+}
+
+/** 百度开放平台 OAuth 令牌（仅主进程持有） */
+export interface BaiduOAuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+export interface BaiduOAuthState {
+  configured: boolean;
+  authorized: boolean;
+  secureStorage: boolean;
+  appName?: string;
+}
+
+export type UploadStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface UploadTask {
+  id: string;
+  platform: SharePlatform;
+  fileName: string;
+  destination: string;
+  totalBytes: number;
+  uploadedBytes: number;
+  status: UploadStatus;
+  error?: string;
+  createdAt: number;
+}

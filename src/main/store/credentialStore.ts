@@ -5,21 +5,33 @@
  */
 
 import { app, safeStorage } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AuthState, SharePlatform } from '../../shared/types';
+import type {
+  AuthState,
+  BaiduOAuthConfig,
+  BaiduOAuthTokens,
+  SharePlatform,
+} from '../../shared/types';
+
+interface EncryptedEntry {
+  data: string;
+  encrypted: boolean;
+}
 
 interface StoreShape {
   version: number;
   /** platform -> { encrypted: base64(密文) } */
-  credentials: Record<string, { data: string; encrypted: boolean }>;
+  credentials: Record<string, EncryptedEntry>;
   settings: Record<string, unknown>;
+  baiduOAuth?: EncryptedEntry;
 }
 
 export class CredentialStore {
   private file: string;
   private cache: StoreShape;
-
+  /** OAuth 记录代际：任何保存/清除都会递增，用于丢弃过期的异步刷新结果 */
+  private baiduOAuthRevision = 0;
   constructor() {
     const dir = app.getPath('userData');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -36,6 +48,7 @@ export class CredentialStore {
             version: raw.version ?? 1,
             credentials: raw.credentials ?? {},
             settings: raw.settings ?? {},
+            baiduOAuth: raw.baiduOAuth && typeof raw.baiduOAuth.data === 'string' ? raw.baiduOAuth : undefined,
           };
         }
       }
@@ -46,10 +59,14 @@ export class CredentialStore {
   }
 
   private persist(): void {
+    const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`;
     try {
-      writeFileSync(this.file, JSON.stringify(this.cache, null, 2), 'utf8');
+      writeFileSync(temporary, JSON.stringify(this.cache, null, 2), 'utf8');
+      renameSync(temporary, this.file);
     } catch (e) {
+      try { unlinkSync(temporary); } catch { /* preserve original failure */ }
       console.error('[store] 写入失败', e);
+      throw e;
     }
   }
 
@@ -112,6 +129,57 @@ export class CredentialStore {
     delete this.cache.credentials[platform];
     delete this.cache.settings[`nickname_${platform}`];
     this.persist();
+  }
+
+  private encryptOAuth(value: string): EncryptedEntry {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('系统安全存储不可用，无法安全保存百度开放平台凭据');
+    }
+    return { data: safeStorage.encryptString(value).toString('base64'), encrypted: true };
+  }
+
+  saveBaiduOAuth(config: BaiduOAuthConfig, tokens?: BaiduOAuthTokens): void {
+    const previous = this.cache.baiduOAuth;
+    try {
+      this.cache.baiduOAuth = this.encryptOAuth(JSON.stringify({ config, tokens: tokens ?? null }));
+      this.persist();
+    } catch (error) {
+      this.cache.baiduOAuth = previous;
+      throw error;
+    }
+    this.baiduOAuthRevision++;
+  }
+
+  /** 当前 OAuth 记录代际；异步刷新完成前记录，完成时比对以免覆盖清除/重新配置 */
+  getBaiduOAuthRevision(): number { return this.baiduOAuthRevision; }
+
+  /** 仅当代际未变化时保存刷新结果；返回是否真正写入 */
+  saveBaiduOAuthIfCurrent(config: BaiduOAuthConfig, tokens: BaiduOAuthTokens, expectedRevision: number): boolean {
+    if (this.baiduOAuthRevision !== expectedRevision) return false;
+    this.saveBaiduOAuth(config, tokens);
+    return true;
+  }
+
+  getBaiduOAuth(): { config: BaiduOAuthConfig; tokens: BaiduOAuthTokens | null } | null {
+    const entry = this.cache.baiduOAuth;
+    if (!entry?.encrypted || !safeStorage.isEncryptionAvailable()) return null;
+    try {
+      const stored = JSON.parse(safeStorage.decryptString(Buffer.from(entry.data, 'base64')));
+      if (!stored?.config?.appKey || !stored?.config?.appSecret || !stored?.config?.appName) return null;
+      return { config: stored.config, tokens: stored.tokens ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  clearBaiduOAuth(): void {
+    delete this.cache.baiduOAuth;
+    this.persist();
+    this.baiduOAuthRevision++;
+  }
+
+  canUseSecureOAuth(): boolean {
+    return safeStorage.isEncryptionAvailable();
   }
 
   getSetting<T>(key: string, fallback: T): T {
