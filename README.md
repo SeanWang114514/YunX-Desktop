@@ -1,5 +1,5 @@
 # 云析 YunX 桌面版
-# 注意 仅测试 仅测试 不代表最终版本
+# 注意 仅测试 仅测试 一堆bug 不代表最终版本
 
 **粘贴分享链接，直接高速下载** —— [CYQawa/YunX](https://github.com/CYQawa/YunX) 的 Windows 桌面移植版。
 
