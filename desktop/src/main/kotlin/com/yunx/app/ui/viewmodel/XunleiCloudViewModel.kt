@@ -1,5 +1,10 @@
 package com.yunx.app.ui.viewmodel
 
+import java.io.File
+import com.yunx.app.data.upload.UploadProgress
+import com.yunx.app.data.upload.UploadRunner
+import com.yunx.app.data.network.HttpClients
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -666,6 +671,47 @@ class XunleiCloudViewModel(
                 _uiState.value = XunleiCloudUiState.Error(e.message ?: "加载失败")
             }
         }
+    }
+
+    // ---------- 上传（迅雷 S3 直传 + gcid 秒传） ----------
+
+    /** 上传进度（null 表示没有任务）；上传弹窗直接读这里 */
+    val uploadProgress: UploadProgress? get() = uploadRunner.progress
+
+    private val uploadRunner = UploadRunner(viewModelScope, { HttpClients.uploadClient() }) { outcome ->
+        // 失败/取消时也刷新：服务端可能已接收文件，但确认响应在途中中断。
+        reloadCurrent()
+        cloudMessage = outcome.message()
+    }
+
+    /**
+     * 上传选中的本地文件到**当前目录**。
+     *
+     * 目标目录在这里就先固定下来（上传期间用户可能切目录、返回上级），
+     * 凭据留到 IO 线程现取，避免拿着已过期的 Cookie 一路失败。
+     */
+    fun uploadFiles(files: List<File>) {
+        val dir = (uiState.value as? XunleiCloudUiState.Loaded)?.dirFid ?: return
+        uploadRunner.start(files, DownloadPlatform.XUNLEI) { io, source ->
+            // 并发文件独立缓存凭据，避免刷新令牌与验证码时互相覆盖。
+            val uploadApi = XunleiApi().apply {
+                refreshTokenProvider = api.refreshTokenProvider
+                webCaptchaRefresher = api.webCaptchaRefresher
+            }
+            val (token, deviceId, captcha) = creds() ?: throw IllegalStateException("请先登录迅雷云盘")
+            uploadApi.cacheUserId(token)
+            uploadApi.upload(io, source, dir, token, deviceId, captcha)
+        }
+    }
+
+    /** 取消当前上传（正在发的那一段会立刻被打断） */
+    fun cancelUpload() = uploadRunner.cancel()
+
+    fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+
+    override fun onCleared() {
+        uploadRunner.cancel()
+        super.onCleared()
     }
 
     class Factory(

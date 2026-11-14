@@ -230,6 +230,23 @@ object DesktopActions {
      * @param filters 文件类型过滤器（显示名 to 通配符），空则不过滤
      * @return 选中文件绝对路径；取消返回 null
      */
+    /** 调用方在 EDT 打开；返回空列表表示取消。 */
+    fun pickFiles(): List<File> {
+        if (WindowsTitleBar.isWindows) {
+            when (val result = WindowsFilePicker.pickFiles(defaultDownloadDir.takeIf { it.isDirectory })) {
+                is WindowsFilePicker.FilesResult.Success -> return result.paths.map(::File)
+                WindowsFilePicker.FilesResult.Cancelled -> return emptyList()
+                WindowsFilePicker.FilesResult.Unavailable -> Unit
+            }
+        }
+        val dialog = FileDialog(null as Frame?, "选择要上传的文件", FileDialog.LOAD)
+        return try {
+            dialog.isMultipleMode = true
+            dialog.isVisible = true
+            dialog.files.toList()
+        } finally { dialog.dispose() }
+    }
+
     fun pickFile(filters: List<Pair<String, String>> = emptyList()): String? {
         val osName = System.getProperty("os.name", "").lowercase()
         val isMac = osName.contains("mac") || osName.contains("darwin")

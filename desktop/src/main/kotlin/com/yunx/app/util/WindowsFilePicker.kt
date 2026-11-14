@@ -34,6 +34,28 @@ object WindowsFilePicker {
         data object Unavailable : Result
     }
 
+    sealed interface FilesResult {
+        data class Success(val paths: List<String>) : FilesResult
+        data object Cancelled : FilesResult
+        data object Unavailable : FilesResult
+    }
+
+    /** 原生多选，与单选共用 COM 生命周期和选项设置。必须在 EDT 调用。 */
+    fun pickFiles(initialDir: File?, title: String = "选择要上传的文件"): FilesResult {
+        val paths = mutableListOf<String>()
+        val result = showDialog(
+            CLSID_FILE_OPEN_DIALOG, IID_I_FILE_OPEN_DIALOG, title, initialDir,
+            emptyList(), null, null,
+            FOS_FILEMUSTEXIST or FOS_PATHMUSTEXIST or FOS_ALLOWMULTISELECT,
+            paths
+        )
+        return when (result) {
+            is Result.Success -> FilesResult.Success(paths)
+            Result.Cancelled -> FilesResult.Cancelled
+            Result.Unavailable -> FilesResult.Unavailable
+        }
+    }
+
     // 微软文档常量：CLSID_FileOpenDialog / CLSID_FileSaveDialog / 对应 IID / IID_IShellItem
     private const val CLSID_FILE_OPEN_DIALOG = "{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}"
     private const val CLSID_FILE_SAVE_DIALOG = "{C0B4E2F3-BA21-4773-8DBA-335EC946EB8B}"
@@ -44,6 +66,7 @@ object WindowsFilePicker {
     // FILEOPENDIALOGOPTIONS 标志
     private const val FOS_OVERWRITEPROMPT = 0x2
     private const val FOS_FORCEFILESYSTEM = 0x40
+    private const val FOS_ALLOWMULTISELECT = 0x200
     private const val FOS_PATHMUSTEXIST = 0x800
     private const val FOS_FILEMUSTEXIST = 0x1000
 
@@ -131,14 +154,15 @@ object WindowsFilePicker {
         filters: List<Pair<String, String>>,
         defaultName: String?,
         defaultExtension: String?,
-        extraOptions: Int
+        extraOptions: Int,
+        selectedPaths: MutableList<String>? = null
     ): Result = runCatching {
         val hr = Ole32.INSTANCE.CoInitializeEx(null, Ole32.COINIT_APARTMENTTHREADED).toInt()
         // S_OK(0)/S_FALSE(1) 时本线程持有 COM 引用，退出时配对释放；
         // RPC_E_CHANGED_MODE 等失败不释放，继续尝试（AWT EDT 通常已是 STA）
         val ownsComInit = hr == 0 || hr == 1
         try {
-            showDialogInternal(clsid, iid, title, initialDir, filters, defaultName, defaultExtension, extraOptions)
+            showDialogInternal(clsid, iid, title, initialDir, filters, defaultName, defaultExtension, extraOptions, selectedPaths)
         } finally {
             if (ownsComInit) Ole32.INSTANCE.CoUninitialize()
         }
@@ -152,7 +176,8 @@ object WindowsFilePicker {
         filters: List<Pair<String, String>>,
         defaultName: String?,
         defaultExtension: String?,
-        extraOptions: Int
+        extraOptions: Int,
+        selectedPaths: MutableList<String>? = null
     ): Result {
         val pDialog = PointerByReference()
         val createHr = Ole32.INSTANCE.CoCreateInstance(
@@ -206,6 +231,30 @@ object WindowsFilePicker {
             // 模态阻塞：弹出对话框
             val showHr = invokeVtbl(dialog, VTB_SHOW, null as WinDef.HWND?)
             if (showHr < 0) return Result.Cancelled
+
+            if (selectedPaths != null) {
+                // IFileOpenDialog::GetResults = 27；IShellItemArray::GetCount/GetItemAt = 7/8。
+                val arrayRef = PointerByReference()
+                if (invokeVtbl(dialog, 27, arrayRef) < 0) return Result.Unavailable
+                val array = arrayRef.value ?: return Result.Unavailable
+                try {
+                    val count = WinDef.DWORDByReference()
+                    if (invokeVtbl(array, 7, count) < 0) return Result.Unavailable
+                    repeat(count.value.toInt()) { index ->
+                        val ref = PointerByReference()
+                        check(invokeVtbl(array, 8, WinDef.DWORD(index.toLong()), ref) >= 0)
+                        val item = checkNotNull(ref.value)
+                        try {
+                            val name = PointerByReference()
+                            check(invokeVtbl(item, VTB_ITEM_GET_DISPLAY_NAME, WinDef.DWORD(SIGDN_FILESYSPATH.toLong()), name) >= 0)
+                            val pointer = checkNotNull(name.value)
+                            try { selectedPaths += pointer.getWideString(0) }
+                            finally { Ole32.INSTANCE.CoTaskMemFree(pointer) }
+                        } finally { release(item) }
+                    }
+                    return selectedPaths.firstOrNull()?.let { Result.Success(it) } ?: Result.Cancelled
+                } finally { release(array) }
+            }
 
             val itemRef = PointerByReference()
             if (invokeVtbl(dialog, VTB_GET_RESULT, itemRef) < 0) return Result.Cancelled

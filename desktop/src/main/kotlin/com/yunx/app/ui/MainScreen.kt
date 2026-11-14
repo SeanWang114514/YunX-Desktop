@@ -128,6 +128,8 @@ import com.yunx.app.ui.clipboard.ClipboardLinkPopup
 import com.yunx.app.ui.components.BrowserHookController
 import com.yunx.app.ui.components.FadeAlertDialog
 import com.yunx.app.ui.components.OverlayDialogHost
+import com.yunx.app.ui.components.UploadProgressHost
+import com.yunx.app.ui.components.UploadTaskDisplay
 import com.yunx.app.ui.login.BaiduLoginScreen
 import com.yunx.app.ui.login.C139LoginScreen
 import com.yunx.app.ui.login.GuangYaLoginScreen
@@ -450,6 +452,10 @@ fun MainScreen(
      */
     val onAddAccount: (String) -> Unit = { platform ->
         scope.launch {
+            if (com.yunx.app.data.upload.UploadSessions.isActive(platform)) {
+                SnackbarController.show("该网盘正在上传，请完成或取消上传后再添加账号")
+                return@launch
+            }
             // ★ 清登录态失败也必须继续打开登录页：不然用户看到的就是「点了添加账号没有任何反应」
             val startedAt = System.currentTimeMillis()
             runCatching { multiAccountViewModel.prepareAddAccount(platform) }
@@ -1323,6 +1329,20 @@ fun MainScreen(
                 onRestartApp = onExitApplication
             )
         }
+
+        // 上传状态常驻主窗口：收起详情或切换页面后仍显示右下角进度。
+        UploadProgressHost(listOfNotNull(
+            quarkCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, quarkCloudViewModel::cancelUpload, quarkCloudViewModel::appendUploadFiles) },
+            ucCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, ucCloudViewModel::cancelUpload, ucCloudViewModel::appendUploadFiles) },
+            xunleiCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, xunleiCloudViewModel::cancelUpload, xunleiCloudViewModel::appendUploadFiles) },
+            baiduCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, baiduCloudViewModel::cancelUpload, baiduCloudViewModel::appendUploadFiles) },
+            c139CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, c139CloudViewModel::cancelUpload, c139CloudViewModel::appendUploadFiles) },
+            pan123CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, pan123CloudViewModel::cancelUpload, pan123CloudViewModel::appendUploadFiles) },
+            pan115CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, pan115CloudViewModel::cancelUpload, pan115CloudViewModel::appendUploadFiles) },
+            guangyaCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, guangyaCloudViewModel::cancelUpload, guangyaCloudViewModel::appendUploadFiles) },
+            ilanzouCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, ilanzouCloudViewModel::cancelUpload, ilanzouCloudViewModel::appendUploadFiles) },
+            lanzouCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, lanzouCloudViewModel::cancelUpload, lanzouCloudViewModel::appendUploadFiles) }
+        ))
 
         // 全局弹窗覆盖层（FadeAlertDialog）：窗口内直接绘制，零原生窗口开销。
         // 放在根部最后 → 绘制在所有内容（含全屏覆盖层）之上。

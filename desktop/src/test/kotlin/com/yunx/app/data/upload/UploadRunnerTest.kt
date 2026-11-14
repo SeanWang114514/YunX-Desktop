@@ -1,0 +1,125 @@
+package com.yunx.app.data.upload
+
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.util.concurrent.TimeUnit
+
+class UploadRunnerTest {
+    @get:Rule val temp = TemporaryFolder()
+    private fun files(count: Int) = (1..count).map { temp.newFile().apply { writeText("file-$it") } }
+
+    @Test fun `批次串行运行并统计全部成功`() = runTest {
+        val outcome = CompletableDeferred<UploadOutcome>()
+        val runner = UploadRunner(this, { OkHttpClient() }) { outcome.complete(it) }
+        val selected = files(3)
+        val visited = mutableListOf<String>()
+        runner.start(selected, "test-success", { "account-A" }) { _, source -> visited += source.name }
+        assertNotNull(runner.progress)
+        val result = outcome.await()
+        assertEquals(selected.map { it.name }, visited)
+        assertEquals(3, result.uploaded)
+        assertEquals(0, result.failed)
+        assertFalse(result.cancelled)
+        assertNull(runner.progress)
+        assertFalse(UploadSessions.isActive("test-success"))
+    }
+
+    @Test fun `第二个文件失败后保留已完成数量并停止后续文件`() = runTest {
+        val outcome = CompletableDeferred<UploadOutcome>()
+        val runner = UploadRunner(this, { OkHttpClient() }) { outcome.complete(it) }
+        var calls = 0
+        runner.start(files(4), "test-failure", { "account-A" }) { _, _ ->
+            if (++calls == 2) error("simulated failure")
+        }
+        val result = outcome.await()
+        assertEquals(2, calls)
+        assertEquals(1, result.uploaded)
+        assertEquals(1, result.failed)
+        assertEquals(2, result.notStarted)
+        assertTrue(result.message().contains("simulated failure"))
+    }
+
+    @Test fun `账号变化后不会执行下一文件协议`() = runTest {
+        val outcome = CompletableDeferred<UploadOutcome>()
+        val runner = UploadRunner(this, { OkHttpClient() }) { outcome.complete(it) }
+        var identity = "account-A"
+        var calls = 0
+        runner.start(files(2), "test-account", { identity }) { _, _ ->
+            calls++
+            identity = "account-B"
+        }
+        val result = outcome.await()
+        assertEquals(1, calls)
+        assertEquals(1, result.uploaded)
+        assertEquals(1, result.failed)
+        assertTrue(result.error!!.contains("账号已变化"))
+    }
+
+    @Test fun `同一平台不能同时启动两个批次`() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val firstDone = CompletableDeferred<UploadOutcome>()
+        val rejected = CompletableDeferred<UploadOutcome>()
+        val first = UploadRunner(this, { OkHttpClient() }) { firstDone.complete(it) }
+        val second = UploadRunner(this, { OkHttpClient() }) { rejected.complete(it) }
+        first.start(files(1), "test-lock", { "A" }) { _, _ -> started.complete(Unit); awaitCancellation() }
+        started.await()
+        second.start(files(1), "test-lock", { "A" }) { _, _ -> error("must not run") }
+        assertTrue(rejected.await().error!!.contains("已有上传任务"))
+        assertThrows(IllegalStateException::class.java) { UploadSessions.requireIdle("test-lock") }
+        first.cancel()
+        assertTrue(firstDone.await().cancelled)
+        assertFalse(UploadSessions.isActive("test-lock"))
+    }
+
+    @Test fun `账号写入期间不能开始上传`() = runTest {
+        UploadSessions.changeAccount("test-mutation") {
+            assertFalse(UploadSessions.acquire("test-mutation") {})
+        }
+        assertFalse(UploadSessions.isActive("test-mutation"))
+    }
+
+    @Test fun `页面作用域销毁能中断阻塞请求并释放账号锁`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+            server.start()
+            val http = OkHttpClient.Builder().addInterceptor(UploadRequestInterceptor()).build()
+            val scope = CoroutineScope(Job() + Dispatchers.Default)
+            val done = CompletableDeferred<UploadOutcome>()
+            val runner = UploadRunner(scope, { http }) { done.complete(it) }
+            try {
+                runner.start(files(2), "test-parent-cancel", { "A" }) { _, _ ->
+                    http.newCall(Request.Builder().url(server.url("/blocked")).build()).execute().use { it.body?.string() }
+                }
+                assertNotNull(server.takeRequest(3, TimeUnit.SECONDS))
+                scope.cancel()
+                val result = kotlinx.coroutines.withTimeout(3000) { done.await() }
+                assertTrue(result.cancelled)
+                assertEquals(0, result.uploaded)
+                assertEquals(1, result.notStarted)
+                assertFalse(UploadSessions.isActive("test-parent-cancel"))
+            } finally { scope.cancel() }
+        }
+    }
+
+    @Test fun `作用域已销毁时启动不会遗留平台锁`() = runTest {
+        val scope = CoroutineScope(Job().apply { cancel() } + Dispatchers.Unconfined)
+        val runner = UploadRunner(scope, { OkHttpClient() }) {}
+        runner.start(files(1), "test-dead-scope", { "A" }) { _, _ -> error("must not run") }
+        assertFalse(UploadSessions.isActive("test-dead-scope"))
+        assertFalse(runner.isRunning)
+    }
+}
