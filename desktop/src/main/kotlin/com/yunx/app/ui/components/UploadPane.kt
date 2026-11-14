@@ -367,12 +367,12 @@ internal fun UploadDestination(destination: String) {
 }
 
 @Composable
-internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = null, onRemove: ((UploadCandidate) -> Unit)? = null, progresses: List<UploadFileProgress> = emptyList()) {
+internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = null, onRemove: ((UploadCandidate) -> Unit)? = null, progresses: List<UploadFileProgress> = emptyList(), modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(currentIndex) {
         if (progresses.isEmpty() && currentIndex != null && files.isNotEmpty()) listState.scrollToItem((currentIndex - 1).coerceIn(files.indices))
     }
-    Box(Modifier.fillMaxWidth().heightIn(min = if (progresses.isEmpty()) 0.dp else 128.dp, max = 200.dp)) {
+    Box(modifier.fillMaxWidth().heightIn(max = 200.dp)) {
         LazyColumn(Modifier.fillMaxWidth().padding(end = 12.dp), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             itemsIndexed(files, key = { _, file -> file.file.path }) { index, file ->
                 val item = progresses.getOrNull(index)

@@ -134,11 +134,11 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
                                 Text("关闭", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        Text("处理中 ${p.activeCount} 个 · 并发上限 ${p.concurrencyLimit} 个 · 失败 ${p.failedCount} · 取消 ${p.cancelledCount}", style = MaterialTheme.typography.bodySmall)
+                        Text("并发 ${p.activeCount}/${p.concurrencyLimit} · 失败 ${p.failedCount} · 取消 ${p.cancelledCount}", style = MaterialTheme.typography.bodySmall)
                         if (p.files.isEmpty()) Text(p.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         else {
                             Text("全部 ${p.count} 个文件 · 滚动查看", style = MaterialTheme.typography.labelSmall)
-                            key(p.platform, p.batchId) { UploadFileList(p.files.map { it.candidate }, progresses = p.files) }
+                            key(p.platform, p.batchId) { UploadFileList(p.files.map { it.candidate }, progresses = p.files, modifier = Modifier.heightIn(max = 120.dp)) }
                         }
                         p.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                         LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())

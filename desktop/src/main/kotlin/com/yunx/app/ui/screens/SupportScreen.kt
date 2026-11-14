@@ -303,7 +303,7 @@ fun SupportScreen(
             // ---------- PC 版仓库入口 ----------
             OutlinedButton(
                 onClick = {
-                    DesktopActions.openUrl("https://github.com/SeanWang114514/YunX-Desktop-Native-Upload")
+                    DesktopActions.openUrl("https://github.com/SeanWang114514/YunX-Desktop")
                     SnackbarController.show("已打开 PC 版仓库")
                 },
                 modifier = Modifier

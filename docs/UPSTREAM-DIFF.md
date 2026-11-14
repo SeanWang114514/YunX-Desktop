@@ -2,7 +2,7 @@
 
 - 上游（Android）：[CYQawa/YunX](https://github.com/CYQawa/YunX)
 - 原桌面版（Windows 桌面移植）：[tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop)
-- 本原生上传修改版：[SeanWang114514/YunX-Desktop-Native-Upload](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload)，上传差异见 [NATIVE_UPLOAD](NATIVE_UPLOAD.md)。下文保留原桌面版与 Android 版的对比。
+- 本原生上传修改版：[SeanWang114514/YunX-Desktop](https://github.com/SeanWang114514/YunX-Desktop)，上传差异见 [NATIVE_UPLOAD](NATIVE_UPLOAD.md)。下文保留原桌面版与 Android 版的对比。
 
 **沿用上游的部分**：网盘分享链接的解析协议、下载引擎（Range 分片并发、弹性区按字节顺序分配、
 断点续传、失败重试、全局限速）、界面框架与主题体系（Compose + Material 3、深色模式 + 种子色）、

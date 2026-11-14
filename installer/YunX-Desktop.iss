@@ -18,9 +18,9 @@ AppId={{A2E1EFC7-6459-4D33-B0FA-A93F36621684}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppNameEn}
-AppPublisherURL=https://github.com/SeanWang114514/YunX-Desktop-Native-Upload
-AppSupportURL=https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/issues
-AppUpdatesURL=https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/releases
+AppPublisherURL=https://github.com/SeanWang114514/YunX-Desktop
+AppSupportURL=https://github.com/SeanWang114514/YunX-Desktop/issues
+AppUpdatesURL=https://github.com/SeanWang114514/YunX-Desktop/releases
 ; 安装程序自身的文件版本信息（资源管理器 → setup.exe 属性 → 详细信息）
 VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}

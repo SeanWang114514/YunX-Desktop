@@ -1,6 +1,6 @@
 # 原生上传版代码审核与修订记录
 
-日期：2026-11-14。基线提交：`e569d6e`。修改版仓库：`SeanWang114514/YunX-Desktop-Native-Upload`。
+日期：2026-11-14。基线提交：`e569d6e`。修改版仓库：`SeanWang114514/YunX-Desktop`。
 
 本轮按用户“全部更改”的指令落实已列出的修复与改进。保留 Kotlin/JVM、Compose Desktop、原 ViewModel、十个平台 API、数据库和依赖版本。保留 tidain、CYQawa 的署名和 AGPL 许可。
 

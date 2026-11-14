@@ -23,8 +23,8 @@
 ## 命令
 
 ```powershell
-git clone https://github.com/SeanWang114514/YunX-Desktop-Native-Upload.git
-cd YunX-Desktop-Native-Upload
+git clone https://github.com/SeanWang114514/YunX-Desktop.git
+cd YunX-Desktop
 
 .\run.ps1 run        # 编译并启动（开发，含 darkmode.dll）
 .\run.ps1 build      # 仅编译 Kotlin（不需要 C++ 编译器）
