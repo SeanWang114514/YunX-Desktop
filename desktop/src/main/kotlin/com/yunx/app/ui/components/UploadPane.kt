@@ -190,7 +190,7 @@ fun rememberUploadUi(
     val state = remember(scope) { UploadUiState(scope) }
     val batch = progress?.takeIf { onAppend != null }
     SideEffect {
-        state.enabled = enabled
+        state.enabled = enabled && batch?.canAppend != false && batch?.cancelling != true
         state.currentDestination = batch?.let { UploadPresentationRegistry.entries[it.platform]?.destination }
             ?.takeIf { it.isNotBlank() } ?: destination
         state.currentAppendMode = batch != null
@@ -268,6 +268,10 @@ internal fun showUploadAppendResult(added: Int) {
     })
 }
 
+internal fun showUploadRetryResult(count: Int) {
+    SnackbarController.show(if (count > 0) "已重新排队 $count 个失败文件" else "任务已变化或已有上传正在执行，请查看当前任务")
+}
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 fun UploadIconButton(onClick: () -> Unit, enabled: Boolean) {
@@ -338,7 +342,7 @@ fun UploadDialogs(state: UploadUiState, progress: UploadProgress?, onCancel: () 
                     Text("正在选择或检查文件…", style = MaterialTheme.typography.bodySmall)
                 }
                 Text(if (state.dragging) "松开文件，继续添加到此列表" else "可继续拖入多个文件，确认后加入上传队列。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                Text(if (appendMode) "加入本批次固定的账号与目录，当前并发上限 $concurrency 个文件。" else "当前并发上限 $concurrency 个文件，可在设置中调整；上传中可继续添加，同名处理遵循当前网盘规则。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (appendMode) "加入本批次固定的账号与目录，当前文件并发上限 $concurrency 个。" else "当前文件并发上限 $concurrency 个，可在设置中调整；同名文件依次上传，单个文件内的分片按顺序发送。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         dismissButton = { TextButton(onClick = state::dismiss) { Text("取消") } },
@@ -368,14 +372,14 @@ internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = n
     LaunchedEffect(currentIndex) {
         if (progresses.isEmpty() && currentIndex != null && files.isNotEmpty()) listState.scrollToItem((currentIndex - 1).coerceIn(files.indices))
     }
-    Box(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
-        LazyColumn(Modifier.fillMaxWidth().padding(end = if (progresses.isEmpty()) 0.dp else 12.dp), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Box(Modifier.fillMaxWidth().heightIn(min = if (progresses.isEmpty()) 0.dp else 128.dp, max = 200.dp)) {
+        LazyColumn(Modifier.fillMaxWidth().padding(end = 12.dp), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             itemsIndexed(files, key = { _, file -> file.file.path }) { index, file ->
                 val item = progresses.getOrNull(index)
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text(file.file.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            Text("${index + 1}. ${file.file.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                             Text(if (item?.isActive == true) "${formatUploadBytes(item.sent)} / ${formatUploadBytes(file.size)}" else formatUploadBytes(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (item != null) Text(uploadFileStatusText(item.status), style = MaterialTheme.typography.labelSmall, color = if (item.status == UploadFileStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
@@ -388,11 +392,12 @@ internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = n
                     }
                     if (item?.isActive == true) {
                         val fraction = if (file.size <= 0) 0f else (item.sent.toDouble() / file.size).toFloat().coerceIn(0f, 1f)
-                        if (item.status == UploadFileStatus.PREPARING) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (item.status == UploadFileStatus.PREPARING && item.sent == 0L) LinearProgressIndicator(Modifier.fillMaxWidth())
                         else LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                if (item.status == UploadFileStatus.UPLOADING) "${(fraction * 100).roundToLong()}% · " +
+                                if (item.stalled) "网络等待，暂无速度"
+                                else if (item.status == UploadFileStatus.UPLOADING) "${(fraction * 100).roundToLong()}% · " +
                                     (item.bytesPerSecond?.let { "${formatUploadBytes(it.roundToLong())}/s" } ?: "--")
                                 else if (item.status == UploadFileStatus.PREPARING) "读取文件 / 计算校验"
                                 else "文件已发送，等待网盘确认",
@@ -413,7 +418,7 @@ internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = n
                 }
             }
         }
-        if (progresses.isNotEmpty()) VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd))
+        if (files.isNotEmpty()) VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd))
     }
 }
 

@@ -241,7 +241,7 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Layers,
             title = "上传并发数",
-            description = "每个网盘同时处理 $uploadConcurrency 个文件，超出排队；修改立即生效",
+            description = "每个网盘同时处理 $uploadConcurrency 个文件，超出排队；调高立即补位，调低不打断已有任务",
             onClick = { showUploadConcurrencyDialog = true }
         )
 
@@ -1009,7 +1009,7 @@ fun SettingsScreen(
         title = { Text("上传并发数") },
         text = {
             Column {
-                Text("按每个网盘计算，同时处理包含准备、上传及等待确认。调低不会中断已经开始的文件。", style = MaterialTheme.typography.bodySmall)
+                Text("设置多个文件同时处理的上限，包含准备、传输及等待确认；同名文件依次上传。单个文件的分片仍按网盘协议顺序发送。调低不会中断已开始的文件。", style = MaterialTheme.typography.bodySmall)
                 Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                     (1..SettingsRepository.MAX_CONCURRENT_UPLOADS).forEach { v ->
                         Row(

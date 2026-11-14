@@ -2,6 +2,7 @@ package com.yunx.app.ui.viewmodel
 
 import java.io.File
 import com.yunx.app.data.upload.UploadProgress
+import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
 import com.yunx.app.data.network.HttpClients
 
@@ -105,13 +106,13 @@ class ILanzouCloudViewModel(
 
     /** 组装认证参数：appToken 缺失且有密码时自动重新登录；userId 缺失时补拉一次。 */
     private suspend fun credential(): ILanzouCredential {
-        val acc = accountRepository.getAccount() ?: throw IllegalStateException("请先登录蓝奏云优享版")
+        val acc = accountRepository.getAccount() ?: throw UploadSessionException("请先登录蓝奏云优享版")
         val token = acc.appToken.ifBlank {
             accountRepository.ensureAppToken()
-                ?: throw IllegalStateException("蓝奏优享登录已过期，请重新登录")
+                ?: throw UploadSessionException("蓝奏优享登录已过期，请重新登录")
         }
         val uuid = acc.uuid.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("蓝奏优享登录已过期，请重新登录")
+            ?: throw UploadSessionException("蓝奏优享登录已过期，请重新登录")
         val userId = acc.userId.ifBlank { accountRepository.ensureUserId().orEmpty() }
         return ILanzouCredential(token, uuid, userId)
     }
@@ -626,6 +627,7 @@ class ILanzouCloudViewModel(
 
     /** 上传进度（null 表示没有任务）；上传弹窗直接读这里 */
     val uploadProgress: UploadProgress? get() = uploadRunner.progress
+    val uploadTaskProgress: UploadProgress? get() = uploadRunner.progress ?: uploadRunner.lastResult
 
     private val uploadRunner = UploadRunner(viewModelScope, { HttpClients.uploadClient() }) { outcome ->
         // 失败/取消时也刷新：服务端可能已接收文件，但确认响应在途中中断。
@@ -651,6 +653,10 @@ class ILanzouCloudViewModel(
     fun cancelUpload() = uploadRunner.cancel()
 
     fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+
+    fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+
+    fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 
     override fun onCleared() {
         uploadRunner.cancel()

@@ -2,6 +2,7 @@ package com.yunx.app.ui.viewmodel
 
 import java.io.File
 import com.yunx.app.data.upload.UploadProgress
+import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
 import com.yunx.app.data.network.HttpClients
 
@@ -112,10 +113,10 @@ class LanzouCloudViewModel(
 
     /** 取个人盘凭据（Cookie + uid + vei），按 Cookie 复用缓存 */
     private suspend fun creds(): LanzouCreds {
-        val acc = accountRepository.getAccount() ?: throw IllegalStateException("请先登录蓝奏云")
+        val acc = accountRepository.getAccount() ?: throw UploadSessionException("请先登录蓝奏云")
         cachedCreds?.let { if (it.cookie == acc.cookie) return it }
         val params = api.fetchLoginParams(acc.cookie)
-            ?: throw IllegalStateException("蓝奏登录态已失效，请重新登录")
+            ?: throw UploadSessionException("蓝奏登录态已失效，请重新登录")
         return LanzouCreds(acc.cookie, params.uid, params.vei).also { cachedCreds = it }
     }
 
@@ -690,6 +691,7 @@ class LanzouCloudViewModel(
 
     /** 上传进度（null 表示没有任务）；上传弹窗直接读这里 */
     val uploadProgress: UploadProgress? get() = uploadRunner.progress
+    val uploadTaskProgress: UploadProgress? get() = uploadRunner.progress ?: uploadRunner.lastResult
 
     private val uploadRunner = UploadRunner(viewModelScope, { HttpClients.uploadClient() }) { outcome ->
         // 失败/取消时也刷新：服务端可能已接收文件，但确认响应在途中中断。
@@ -715,6 +717,10 @@ class LanzouCloudViewModel(
     fun cancelUpload() = uploadRunner.cancel()
 
     fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+
+    fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+
+    fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 
     override fun onCleared() {
         uploadRunner.cancel()

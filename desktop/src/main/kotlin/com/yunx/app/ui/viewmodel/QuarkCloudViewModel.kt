@@ -2,6 +2,7 @@ package com.yunx.app.ui.viewmodel
 
 import java.io.File
 import com.yunx.app.data.upload.UploadProgress
+import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
 import com.yunx.app.data.network.HttpClients
 
@@ -758,6 +759,7 @@ class QuarkCloudViewModel(
 
     /** 上传进度（null 表示没有任务）；上传弹窗直接读这里 */
     val uploadProgress: UploadProgress? get() = uploadRunner.progress
+    val uploadTaskProgress: UploadProgress? get() = uploadRunner.progress ?: uploadRunner.lastResult
 
     private val uploadRunner = UploadRunner(viewModelScope, { HttpClients.uploadClient() }) { outcome ->
         // 失败/取消时也刷新：服务端可能已接收文件，但确认响应在途中中断。
@@ -774,7 +776,7 @@ class QuarkCloudViewModel(
     fun uploadFiles(files: List<File>) {
         val dir = (uiState.value as? QuarkCloudUiState.Loaded)?.dirFid ?: return
         uploadRunner.start(files, DownloadPlatform.QUARK) { io, source ->
-            val cookie = cookieProvider() ?: throw IllegalStateException("请先登录夸克网盘")
+            val cookie = cookieProvider() ?: throw UploadSessionException("请先登录夸克网盘")
             api.upload(io, source, dir, cookie)
         }
     }
@@ -783,6 +785,10 @@ class QuarkCloudViewModel(
     fun cancelUpload() = uploadRunner.cancel()
 
     fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+
+    fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+
+    fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 
     override fun onCleared() {
         uploadRunner.cancel()

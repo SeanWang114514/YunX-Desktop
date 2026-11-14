@@ -17,7 +17,7 @@
 # PowerShell 5.1 reads BOM-less files using the ANSI code page, which mangles non-ASCII text.
 $ErrorActionPreference = 'SilentlyContinue'
 try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-$Aumid = 'YunX.Desktop'
+$Aumid = 'YunX.Desktop.NativeUpload'
 $Tag = 'yunx-dl'
 $Group = 'yunx'
 $SettingKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\' + $Aumid

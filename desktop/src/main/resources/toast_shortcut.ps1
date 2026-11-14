@@ -14,13 +14,13 @@ param(
     [string]$Icon = ''
 )
 $ErrorActionPreference = 'Stop'
-$Aumid = 'YunX.Desktop'
+$Aumid = 'YunX.Desktop.NativeUpload'
 
 $programs = [Environment]::GetFolderPath('Programs')
 if ([string]::IsNullOrEmpty($programs)) { throw 'Start Menu Programs folder not found' }
-# shortcut name is U+4E91 U+6790 (the app's Chinese name); spelled via code points so this file
+# shortcut name matches the Native Upload installer's Chinese name; use code points so this file
 # stays pure ASCII (PowerShell 5.1 reads BOM-less UTF-8 as ANSI and would mangle a literal)
-$name = "$([char]0x4E91)$([char]0x6790).lnk"
+$name = "$([char]0x4E91)$([char]0x6790)$([char]0x00B7)$([char]0x539F)$([char]0x751F)$([char]0x4E0A)$([char]0x4F20)$([char]0x7248).lnk"
 $lnk = Join-Path $programs $name
 
 Add-Type -TypeDefinition @'

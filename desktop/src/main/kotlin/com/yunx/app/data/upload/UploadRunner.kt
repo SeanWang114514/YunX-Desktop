@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -40,12 +41,23 @@ data class UploadProgress(
     val activeCount: Int = 0,
     val batchId: Long = 0L,
     val canAppend: Boolean = true,
-    val concurrencyLimit: Int = SettingsRepository.DEFAULT_MAX_CONCURRENT_UPLOADS
+    val concurrencyLimit: Int = SettingsRepository.DEFAULT_MAX_CONCURRENT_UPLOADS,
+    val finished: Boolean = false,
+    val canRetry: Boolean = false,
+    val error: String? = null
 ) {
     val fraction: Float get() = if (size <= 0) 0f else (sent.toDouble() / size).toFloat().coerceIn(0f, 1f)
     val remainingSeconds: Long? get() = bytesPerSecond
         ?.takeIf { phase == UploadPhase.UPLOADING && it > 0.0 && it.isFinite() }
-        ?.let { ((size - sent).coerceAtLeast(0L) / it).roundToLong() }
+        ?.takeIf { files.none { file -> file.isActive && file.stalled } }
+        ?.let {
+            val remaining = if (files.isEmpty()) (size - sent).coerceAtLeast(0L) else files
+                .filter { file -> file.isActive || file.status == UploadFileStatus.WAITING }
+                .sumOf { file -> (file.candidate.size - file.sent).coerceAtLeast(0L) }
+            (remaining / it).roundToLong()
+        }
+    val failedCount: Int get() = files.count { it.status == UploadFileStatus.FAILED }
+    val cancelledCount: Int get() = files.count { it.status == UploadFileStatus.CANCELLED }
 }
 
 data class UploadOutcome(
@@ -53,13 +65,18 @@ data class UploadOutcome(
     val failed: Int,
     val cancelled: Boolean,
     val error: String?,
-    val notStarted: Int = 0
+    val notStarted: Int = 0,
+    val cancelledFiles: Int = 0
 ) {
     fun message(): String = buildString {
-        append(if (cancelled) "上传已取消" else if (failed > 0 || error != null) "上传失败" else "上传完成")
+        append(if (cancelled) "上传已取消" else if (failed > 0 || error != null) "上传结束，存在失败" else "上传完成")
         append("：成功 ").append(uploaded).append(" 个")
         if (failed > 0) append("，失败 ").append(failed).append(" 个")
-        if (notStarted > 0) append("，未开始 ").append(notStarted).append(" 个")
+        if (cancelledFiles > 0) append("，取消 ").append(cancelledFiles).append(" 个")
+        if (notStarted > 0) {
+            if (cancelledFiles > 0) append("（其中 ").append(notStarted).append(" 个未开始）")
+            else append("，未开始 ").append(notStarted).append(" 个")
+        }
         if (!error.isNullOrBlank()) append("。 ").append(error)
     }
 }
@@ -72,6 +89,9 @@ class UploadRunner(
 ) {
     var progress by mutableStateOf<UploadProgress?>(null)
         private set
+    var lastResult by mutableStateOf<UploadProgress?>(null)
+        private set
+    private var retryAction: ((List<File>) -> Unit)? = null
 
     private class Item(val file: File) {
         var progress = UploadFileProgress(UploadCandidate(file, file.length().coerceAtLeast(0L)))
@@ -79,6 +99,7 @@ class UploadRunner(
         var lastEmit = 0L
         var speedSampleTime = 0L
         var speedSampleSent = 0L
+        var lastGrowthTime = 0L
     }
 
     private val lock = Any()
@@ -92,6 +113,27 @@ class UploadRunner(
     private var uploadPlatform = ""
     private var concurrencyLimit = SettingsRepository.DEFAULT_MAX_CONCURRENT_UPLOADS
     val isRunning: Boolean get() = progress != null
+
+    /** 只重试上一批失败的文件，沿用原账号及目录；不自动重放写请求。 */
+    fun retryFailed(expectedBatchId: Long): Int {
+        val (files, action) = synchronized(lock) {
+            val result = lastResult ?: return -1
+            val retry = retryAction
+            if (isRunning || result.batchId != expectedBatchId || !result.canRetry || retry == null) return -1
+            result.files.filter { it.status == UploadFileStatus.FAILED }.map { it.candidate.file } to retry
+        }
+        action(files)
+        return files.size
+    }
+
+    fun dismissResult(expectedBatchId: Long) {
+        synchronized(lock) {
+            if (lastResult?.batchId == expectedBatchId) {
+                lastResult = null
+                retryAction = null
+            }
+        }
+    }
 
     fun cancel() {
         if (!isRunning) return
@@ -133,6 +175,8 @@ class UploadRunner(
             concurrencyLimit = SettingsRepository.uploadConcurrency.value
             batchId++
             batchError = null
+            lastResult = null
+            retryAction = null
             acceptingFiles = true
             queueSignal = signal
             queue.clear()
@@ -141,6 +185,7 @@ class UploadRunner(
         }
         val worker = scope.launch(start = CoroutineStart.LAZY) {
             var cancelled = false
+            var batchIdentity: String? = null
             val cancellationWatcher = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
                 try { awaitCancellation() } finally { cancelActive() }
             }
@@ -153,9 +198,28 @@ class UploadRunner(
                     signal.trySend(Unit)
                 }
             }
+            val speedWatcher = launch {
+                while (isActive) {
+                    delay(500L)
+                    synchronized(lock) {
+                        val now = System.nanoTime()
+                        var changed = false
+                        queue.filter { it.progress.status == UploadFileStatus.UPLOADING }.forEach { item ->
+                            if (!item.progress.stalled && now - item.lastGrowthTime >= 2_000_000_000L) {
+                                item.progress = item.progress.copy(bytesPerSecond = null, stalled = true)
+                                item.speedSampleTime = 0L
+                                item.speedSampleSent = item.progress.sent
+                                changed = true
+                            }
+                        }
+                        if (changed) publishLocked()
+                    }
+                }
+            }
             try {
                 val identity = withContext(Dispatchers.IO) { accountIdProvider() }
                 check(!identity.isNullOrBlank()) { "请先登录该网盘" }
+                batchIdentity = identity
                 coroutineScope {
                     while (true) {
                         currentCoroutineContext().ensureActive()
@@ -188,15 +252,35 @@ class UploadRunner(
                 cancelActive()
                 cancellationWatcher.cancel()
                 concurrencyWatcher.cancel()
+                speedWatcher.cancel()
                 val outcome = synchronized(lock) {
+                    val notStarted = queue.count { it.progress.status == UploadFileStatus.WAITING }
+                    queue.filter { it.progress.isActive || it.progress.status == UploadFileStatus.WAITING }.forEach {
+                        it.progress = it.progress.copy(status = UploadFileStatus.CANCELLED, bytesPerSecond = null, stalled = false)
+                    }
                     val outcome = UploadOutcome(
                         queue.count { it.progress.status == UploadFileStatus.COMPLETED },
                         queue.count { it.progress.status == UploadFileStatus.FAILED },
                         cancelled || cancelRequested,
-                        batchError,
-                        queue.count { it.progress.status == UploadFileStatus.WAITING }
+                        batchError ?: queue.firstOrNull { it.progress.status == UploadFileStatus.FAILED }?.let {
+                            "${it.file.name}：${it.progress.error}"
+                        },
+                        notStarted,
+                        queue.count { it.progress.status == UploadFileStatus.CANCELLED }
                     )
                     acceptingFiles = false
+                    publishLocked()
+                    if (outcome.failed > 0 || outcome.cancelled || outcome.error != null) {
+                        val identity = batchIdentity
+                        lastResult = progress?.copy(finished = true, canAppend = false, canRetry = outcome.failed > 0 && identity != null, error = batchError)
+                        if (identity != null) retryAction = { failedFiles ->
+                            start(failedFiles, platform, {
+                                accountIdProvider().also {
+                                    check(it == identity) { "账号已变化，请切回原账号后重试失败文件" }
+                                }
+                            }, upload)
+                        }
+                    }
                     progress = null
                     queue.clear()
                     queueSignal = null
@@ -235,7 +319,7 @@ class UploadRunner(
         var io: UploadIo? = null
         try {
             currentCoroutineContext().ensureActive()
-            check(accountIdProvider() == identity) { "账号已变化，上传已停止，请重新选择文件" }
+            if (accountIdProvider() != identity) throw UploadSessionException("账号已变化，上传已停止，请重新选择文件")
             val source = UploadSource.resolve(item.file)
             val transfer = UploadIo(source, clientProvider) { phase, sent -> emit(item, source, phase, sent) }
             io = transfer
@@ -252,10 +336,10 @@ class UploadRunner(
             // 请求体写完不算成功，仍须协议确认并检查本地文件未变化。
             source.verifyUnchanged()
             synchronized(lock) {
-                item.progress = item.progress.copy(status = UploadFileStatus.COMPLETED, sent = source.size, bytesPerSecond = null)
+                item.progress = item.progress.copy(status = UploadFileStatus.COMPLETED, sent = source.size, bytesPerSecond = null, stalled = false)
             }
         } catch (e: CancellationException) {
-            synchronized(lock) { item.progress = item.progress.copy(status = UploadFileStatus.CANCELLED, bytesPerSecond = null) }
+            synchronized(lock) { item.progress = item.progress.copy(status = UploadFileStatus.CANCELLED, bytesPerSecond = null, stalled = false) }
             cancel()
             throw e
         } catch (e: Exception) {
@@ -264,9 +348,10 @@ class UploadRunner(
                 item.progress = item.progress.copy(
                     status = if (cancelled) UploadFileStatus.CANCELLED else UploadFileStatus.FAILED,
                     bytesPerSecond = null,
+                    stalled = false,
                     error = if (cancelled) null else e.message ?: "网络错误"
                 )
-                if (!cancelled) {
+                if (!cancelled && e is UploadSessionException) {
                     acceptingFiles = false
                     if (batchError == null) batchError = "${item.file.name}：${e.message ?: "网络错误"}"
                 }
@@ -295,27 +380,30 @@ class UploadRunner(
             UploadPhase.FINISHING -> UploadFileStatus.FINISHING
         }
         val boundedSent = when (phase) {
-            UploadPhase.PREPARING -> 0L
+            UploadPhase.PREPARING -> current.sent.coerceIn(0L, source.size)
             UploadPhase.UPLOADING -> sent.coerceIn(0L, source.size)
             UploadPhase.FINISHING -> source.size
         }
         val changed = current.status != status || boundedSent < current.sent
+        val growing = boundedSent > current.sent
+        if (changed || growing) item.lastGrowthTime = now
         if (!changed && boundedSent != source.size && now - item.lastEmit < 120_000_000L) return@synchronized
         item.lastEmit = now
         var speed = current.bytesPerSecond
-        if (changed) {
+        if (changed || item.speedSampleTime == 0L) {
             item.speedSampleTime = now
             item.speedSampleSent = boundedSent
             speed = null
         } else if (phase == UploadPhase.UPLOADING) {
             val elapsed = now - item.speedSampleTime
             if (elapsed >= 500_000_000L || (boundedSent == source.size && boundedSent > item.speedSampleSent && elapsed > 0L)) {
-                speed = (boundedSent - item.speedSampleSent) * 1_000_000_000.0 / elapsed
+                val sample = (boundedSent - item.speedSampleSent) * 1_000_000_000.0 / elapsed
+                speed = speed?.let { it * 0.7 + sample * 0.3 } ?: sample
                 item.speedSampleTime = now
                 item.speedSampleSent = boundedSent
             }
         }
-        item.progress = current.copy(status = status, sent = boundedSent, bytesPerSecond = speed)
+        item.progress = current.copy(status = status, sent = boundedSent, bytesPerSecond = speed, stalled = !changed && !growing && current.stalled)
         publishLocked()
     }
 

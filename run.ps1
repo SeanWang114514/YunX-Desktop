@@ -3,7 +3,7 @@
 #   run       编译并启动桌面应用
 #   build     仅编译
 #   package   调用 portable-package.ps1 生成免安装包 (release\YunX-Desktop\)
-#   installer 调用 installer-package.ps1 生成安装程序 (release\YunX-Desktop-setup-*.exe)
+#   installer 调用 installer-package.ps1 生成安装程序 (release\YunX-Desktop-Native-Upload-setup-*.exe)
 
 param(
     [Parameter(Position=0)]

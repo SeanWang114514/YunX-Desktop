@@ -12,12 +12,12 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Windows 通知中心下载进度（toast 进度条）：
  * - 常驻 PowerShell 子进程持有 WinRT ToastNotificationManager，Kotlin 通过 stdin 逐行喂进度；
- * - AUMID 注册在 HKCU\Software\Classes\AppUserModelId\YunX.Desktop（通知显示「云析」与应用图标）；
+ * - AUMID 注册在 HKCU\Software\Classes\AppUserModelId\YunX.Desktop.NativeUpload，与上游通知身份分开；
  * - 同 tag/group 重发会原地替换 Action Center 里的既有 toast（进度条原地刷新，不刷屏）。
  * 非 Windows 平台全部 no-op。
  */
 object WindowsToastNotifier {
-    private const val AUMID = "YunX.Desktop"
+    private const val AUMID = "YunX.Desktop.NativeUpload"
     private const val UPDATE_THROTTLE_MS = 1000L
 
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -92,7 +92,7 @@ object WindowsToastNotifier {
         if (!starting.compareAndSet(false, true)) return
         try {
             closeQuietly() // 清掉可能已死掉的旧会话
-            val script = extractResource("toast_progress.ps1", "yunx-toast.ps1")
+            val script = extractResource("toast_progress.ps1", "yunx-native-upload-toast.ps1")
             if (script == null) {
                 Log.w(TAG, "toast_progress.ps1 资源缺失，通知中心进度不可用")
                 return
@@ -181,7 +181,7 @@ object WindowsToastNotifier {
         try {
             val key = "Software\\Classes\\AppUserModelId\\$AUMID"
             Advapi32Util.registryCreateKey(WinReg.HKEY_CURRENT_USER, key)
-            Advapi32Util.registrySetStringValue(WinReg.HKEY_CURRENT_USER, key, "DisplayName", "云析")
+            Advapi32Util.registrySetStringValue(WinReg.HKEY_CURRENT_USER, key, "DisplayName", "云析·原生上传版")
             iconFile()?.toURI()?.toString()?.let {
                 Advapi32Util.registrySetStringValue(WinReg.HKEY_CURRENT_USER, key, "IconUri", it)
             }
@@ -256,7 +256,7 @@ object WindowsToastNotifier {
     @Synchronized
     fun setShortcutEnabled(enabled: Boolean): ShortcutResult {
         if (!isWindows) return ShortcutResult.FAILED
-        val script = extractResource("toast_shortcut.ps1", "yunx-toast-shortcut.ps1")
+        val script = extractResource("toast_shortcut.ps1", "yunx-native-upload-toast-shortcut.ps1")
             ?: run {
                 Log.w(TAG, "toast_shortcut.ps1 资源缺失")
                 return ShortcutResult.FAILED

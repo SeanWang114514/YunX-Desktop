@@ -2,22 +2,22 @@
 
 <img src="desktop/src/main/resources/icon.png" width="120" alt="云析 YunX-Desktop" />
 
-# 云析桌面版 · YunX-Desktop
+# 云析桌面版 · YunX-Desktop-Native-Upload
 
-**粘贴分享链接，直接高速下载 —— 云析 YunX 官方 Windows 桌面版**
+**基于 YunX-Desktop 增量修改的原生上传版：多文件并发、拖拽追加与后台任务状态**
 
 网盘：夸克 / UC / 迅雷 / 百度 / 139 / 123 / 115 / 光鸭 / 蓝奏云 / 蓝奏云优享版；
 视频：哔哩哔哩 / 小红书 / 抖音 / 微博 / 快手 / AcFun / Pixiv；另支持磁力 / BT 种子 / ed2k 等 P2P 链接。
 Range 分片并发 + 断点续传，B 站高清自动合轨。
 
-[![Release](https://img.shields.io/github/v/release/tidain/YunX-Desktop?style=flat-square\&label=release\&color=4C8BF5)](https://github.com/tidain/YunX-Desktop/releases/latest)
-[![Stars](https://img.shields.io/github/stars/tidain/YunX-Desktop?style=flat-square\&logo=github\&color=4C8BF5)](https://github.com/tidain/YunX-Desktop/stargazers)
+[![Release](https://img.shields.io/github/v/release/SeanWang114514/YunX-Desktop-Native-Upload?style=flat-square\&label=release\&color=4C8BF5)](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/releases/latest)
+[![Stars](https://img.shields.io/github/stars/SeanWang114514/YunX-Desktop-Native-Upload?style=flat-square\&logo=github\&color=4C8BF5)](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/stargazers)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square\&logo=windows\&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square\&logo=kotlin\&logoColor=white)](https://kotlinlang.org/)
 [![Compose](https://img.shields.io/badge/Compose%20Multiplatform-Desktop-4285F4?style=flat-square\&logo=jetpackcompose\&logoColor=white)](https://www.jetbrains.com/lp/compose-multiplatform/)
 
-[下载最新版](https://github.com/tidain/YunX-Desktop/releases/latest) · [功能](docs/FEATURES.md) · [使用](docs/USAGE.md) · [浏览器插件](#浏览器插件) · [构建](docs/BUILD.md) · [常见问题](#常见问题) · [与安卓版差异](docs/UPSTREAM-DIFF.md)
+[下载最新版](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/releases/latest) · [功能](docs/FEATURES.md) · [使用](docs/USAGE.md) · [浏览器插件](#浏览器插件) · [构建](docs/BUILD.md) · [常见问题](#常见问题) · [与安卓版差异](docs/UPSTREAM-DIFF.md)
 
 </div>
 
@@ -27,11 +27,13 @@ Range 分片并发 + 断点续传，B 站高清自动合轨。
 > 任何收费版本均为二次打包的诈骗版本，与本项目无关。
 
 > **本项目使用 AGPL-3.0 开源协议。** 与安卓版 [CYQawa/YunX](https://github.com/CYQawa/YunX)
-> 同属云析项目；若你使用了本项目的代码，请同样以 AGPL-3.0 开放源代码。
+> 及原桌面版 [tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop) 保持相同许可证；若你使用了本项目的代码，请同样以 AGPL-3.0 开放源代码。
 
 ## 简介
 
-云析 YunX 的 **官方 Windows 桌面版**：粘贴**网盘分享链接**或**视频作品链接**，即可浏览内容、在线预览并直接高速下载，全程在电脑上完成；
+本仓库是云析 YunX 桌面版的 **独立原生上传修改版，不是上游官方发布**。保留原 Kotlin Compose Desktop 架构，增加桌面 API 直传、可配置文件并发、拖拽追加和上传进度界面。上传说明见 [NATIVE_UPLOAD](docs/NATIVE_UPLOAD.md)，本轮修订见 [静态审核与改进记录](docs/UPLOAD_REVIEW_2026-11-14.md)。
+
+沿用原桌面版功能：粘贴**网盘分享链接**或**视频作品链接**，即可浏览内容、在线预览并直接高速下载，全程在电脑上完成；
 也支持**磁力 / BT 种子 / ed2k** 等 P2P 链接下载。
 网盘与视频平台都支持多账号（主账号 / 备注），登录凭证加密存本机，并可导出加密备份换机恢复。
 提供**免安装便携版**（整个文件夹拷走即用）与**安装版**（开始菜单 / 桌面快捷方式，可卸载）两种分发形式。
@@ -150,13 +152,13 @@ Range 分片并发 + 断点续传，B 站高清自动合轨。
 `installer` 会在这一步失败）。JDK、Gradle、Inno Setup 均无需手动安装。
 
 ```powershell
-git clone https://github.com/tidain/YunX-Desktop.git
-cd YunX-Desktop
+git clone https://github.com/SeanWang114514/YunX-Desktop-Native-Upload.git
+cd YunX-Desktop-Native-Upload
 
 .\run.ps1 run        # 编译并启动（开发，含 darkmode.dll）
 .\run.ps1 build      # 仅编译 Kotlin（不需要 C++ 编译器）
 .\run.ps1 package    # 免安装便携版 → release\YunX-Desktop\
-.\run.ps1 installer  # 单文件安装程序 → release\YunX-Desktop-setup-*.exe
+.\run.ps1 installer  # 单文件安装程序 → release\YunX-Desktop-Native-Upload-setup-*.exe
 ```
 
 环境要求、版本号管理与打包产物见 **[构建与打包](docs/BUILD.md)**。
@@ -164,7 +166,9 @@ cd YunX-Desktop
 ## 常见问题
 
 <details>
-<summary><b>为什么从「第三方移植」变成了「官方桌面版」？</b></summary>
+<summary><b>本修改版与上游官方桌面版是什么关系？</b></summary>
+
+本仓库只在原桌面版源码上增加上传能力，独立维护，不代表上游作者发布。以下为原桌面版的项目历史说明：
 
 项目早期确实是社区移植（安卓版 [CYQawa/YunX](https://github.com/CYQawa/YunX) 的 Windows 移植）。
 **2026 年 10 月 2 日上午 8:40**，桌面版作者（tidain）加入安卓版仓库成为协作者，
@@ -184,7 +188,7 @@ cd YunX-Desktop
 <summary><b>便携版和安装版有什么区别？</b></summary>
 
 便携版是免安装的文件夹，拷到任意位置双击 `YunX-Desktop.exe` 即可运行；
-安装版走安装向导，安装到 `%LOCALAPPDATA%\Programs\YunX-Desktop`，并创建开始菜单 / 桌面快捷方式，可在设置中卸载。
+安装版走安装向导，安装到 `%LOCALAPPDATA%\Programs\YunX-Desktop-Native-Upload`，并创建开始菜单 / 桌面快捷方式，可在设置中卸载。
 两者功能完全一致。
 
 </details>
@@ -199,9 +203,9 @@ cd YunX-Desktop
 
 ## 支持开发
 
-- **GitHub Star**：给 [tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop) 点个 Star ⭐
+- **GitHub Star**：给 [SeanWang114514/YunX-Desktop-Native-Upload](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload) 点个 Star ⭐
 
-- **提交 Issues**：发现 Bug 或有功能建议欢迎反馈
+- **提交 Issues**：发现 Bug 或有功能建议请到[修改版 Issues](https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/issues) 反馈
 
 - **赞赏**：应用内「支持开发」页面可扫码赞赏安卓版作者（CYQawa）与桌面端作者（tidain）
 
@@ -217,7 +221,7 @@ cd YunX-Desktop
 
 ## 开源协议
 
-本项目与安卓版 [CYQawa/YunX](https://github.com/CYQawa/YunX) 同属云析项目，同样以
+本修改版基于 [tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop)，上传实现参考安卓版 [CYQawa/YunX](https://github.com/CYQawa/YunX)，保留原作者署名并以
 [GNU AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) 协议开源，详见 [LICENSE](LICENSE)。
 完整的免责与合规说明见 **[免责声明](docs/DISCLAIMER.md)**。
 
@@ -225,27 +229,31 @@ cd YunX-Desktop
 
 - 安卓版仓库：<https://github.com/CYQawa/YunX>
 
-- PC 版仓库：<https://github.com/tidain/YunX-Desktop>
+- 本原生上传修改版：<https://github.com/SeanWang114514/YunX-Desktop-Native-Upload>
 
-- 问题与建议：<https://github.com/tidain/YunX-Desktop/issues>
+- 原桌面版仓库（tidain）：<https://github.com/tidain/YunX-Desktop>
+
+- 问题与建议：<https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/issues>
 
 ## 友情链接
-- 云析的Docker社区移植版（基于本仓库修改，作为本仓库的下游分支）：[mu-zi-lee/YunX-Docker](https://github.com/mu-zi-lee/YunX-Docker)
+- 云析的 Docker 社区移植版（基于原桌面版）：[mu-zi-lee/YunX-Docker](https://github.com/mu-zi-lee/YunX-Docker)
 
 ## 贡献者
 
 <sub><sup>Contributors</sup></sub>
 
-<a href="https://github.com/tidain/YunX-Desktop/graphs/contributors">
-  <img alt="contributors" src="https://contrib.rocks/image?repo=tidain/YunX-Desktop" />
+感谢原桌面版作者 tidain、安卓版作者 CYQawa 及[上游贡献者](https://github.com/tidain/YunX-Desktop/graphs/contributors)。下方列出本修改版仓库的贡献者。
+
+<a href="https://github.com/SeanWang114514/YunX-Desktop-Native-Upload/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=SeanWang114514/YunX-Desktop-Native-Upload" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=tidain%2Fyunx-desktop&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=SeanWang114514%2FYunX-Desktop-Native-Upload&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tidain/yunx-desktop&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tidain/yunx-desktop&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tidain/yunx-desktop&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=SeanWang114514/YunX-Desktop-Native-Upload&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=SeanWang114514/YunX-Desktop-Native-Upload&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=SeanWang114514/YunX-Desktop-Native-Upload&type=date&legend=top-left" />
  </picture>
 </a>

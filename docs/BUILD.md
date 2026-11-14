@@ -2,6 +2,10 @@
 
 > 概览见 [README](../README.md)
 
+本仓库是原生上传修改版。安装器使用独立 AppId、`YunX-Desktop-Native-Upload` 安装目录、修改版快捷方式与通知身份；便携产物仍放在 `release/YunX-Desktop/`，EXE 和内部配置名保持兼容。仍沿用原数据目录与单实例规则，不支持同时运行原版和修改版。
+
+2026-11-14 本轮仅修改源码并静态核对，未重新生成可执行文件。已有 `release/` 目录中的 EXE/JAR 不包含本轮修复。打包脚本不再强制结束运行中的程序；输出目录被占用时会重试并提示手动关闭。
+
 ## 环境要求
 
 要求：Windows 10/11 x64。
@@ -19,13 +23,13 @@
 ## 命令
 
 ```powershell
-git clone https://github.com/tidain/YunX-Desktop.git
-cd YunX-Desktop
+git clone https://github.com/SeanWang114514/YunX-Desktop-Native-Upload.git
+cd YunX-Desktop-Native-Upload
 
 .\run.ps1 run        # 编译并启动（开发，含 darkmode.dll）
 .\run.ps1 build      # 仅编译 Kotlin（不需要 C++ 编译器）
 .\run.ps1 package    # 免安装便携版 → release\YunX-Desktop\
-.\run.ps1 installer  # 单文件安装程序 → release\YunX-Desktop-setup-*.exe
+.\run.ps1 installer  # 单文件安装程序 → release\YunX-Desktop-Native-Upload-setup-*.exe
 ```
 
 也可双击 `run.bat`（走同一入口）。中文向导语言包随仓库分发（`installer\ChineseSimplified.isl`）。
@@ -64,7 +68,7 @@ Beta=0           ← 第二行：Beta=1 预览版 / Beta=0 正式版（缺省 = 
 | 产物 | 位置 | 说明 |
 | --- | --- | --- |
 | 便携版 | `release\YunX-Desktop\` | 整个文件夹拷走即用，双击 `YunX-Desktop.exe` 运行，无需安装 |
-| 安装程序 | `release\YunX-Desktop-setup-<版本>.exe` | 每用户安装到 `%LOCALAPPDATA%\Programs\YunX-Desktop`，无需管理员权限；创建开始菜单 / 桌面快捷方式「云析」，可卸载 |
+| 安装程序 | `release\YunX-Desktop-Native-Upload-setup-<版本>.exe` | 每用户安装到 `%LOCALAPPDATA%\Programs\YunX-Desktop-Native-Upload`，无需管理员权限；创建开始菜单 / 桌面快捷方式「云析·原生上传版」，可卸载 |
 
 打包脚本会自动结束正在运行的程序实例，并在输出目录被占用时重试删除。
 

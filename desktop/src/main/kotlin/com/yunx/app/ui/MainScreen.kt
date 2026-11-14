@@ -1332,16 +1332,16 @@ fun MainScreen(
 
         // 上传状态常驻主窗口：收起详情或切换页面后仍显示右下角进度。
         UploadProgressHost(listOfNotNull(
-            quarkCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, quarkCloudViewModel::cancelUpload, quarkCloudViewModel::appendUploadFiles) },
-            ucCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, ucCloudViewModel::cancelUpload, ucCloudViewModel::appendUploadFiles) },
-            xunleiCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, xunleiCloudViewModel::cancelUpload, xunleiCloudViewModel::appendUploadFiles) },
-            baiduCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, baiduCloudViewModel::cancelUpload, baiduCloudViewModel::appendUploadFiles) },
-            c139CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, c139CloudViewModel::cancelUpload, c139CloudViewModel::appendUploadFiles) },
-            pan123CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, pan123CloudViewModel::cancelUpload, pan123CloudViewModel::appendUploadFiles) },
-            pan115CloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, pan115CloudViewModel::cancelUpload, pan115CloudViewModel::appendUploadFiles) },
-            guangyaCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, guangyaCloudViewModel::cancelUpload, guangyaCloudViewModel::appendUploadFiles) },
-            ilanzouCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, ilanzouCloudViewModel::cancelUpload, ilanzouCloudViewModel::appendUploadFiles) },
-            lanzouCloudViewModel.uploadProgress?.let { UploadTaskDisplay(it, lanzouCloudViewModel::cancelUpload, lanzouCloudViewModel::appendUploadFiles) }
+            quarkCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, quarkCloudViewModel::cancelUpload, quarkCloudViewModel::appendUploadFiles, quarkCloudViewModel::retryFailedUploads, quarkCloudViewModel::dismissUploadResult) },
+            ucCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, ucCloudViewModel::cancelUpload, ucCloudViewModel::appendUploadFiles, ucCloudViewModel::retryFailedUploads, ucCloudViewModel::dismissUploadResult) },
+            xunleiCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, xunleiCloudViewModel::cancelUpload, xunleiCloudViewModel::appendUploadFiles, xunleiCloudViewModel::retryFailedUploads, xunleiCloudViewModel::dismissUploadResult) },
+            baiduCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, baiduCloudViewModel::cancelUpload, baiduCloudViewModel::appendUploadFiles, baiduCloudViewModel::retryFailedUploads, baiduCloudViewModel::dismissUploadResult) },
+            c139CloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, c139CloudViewModel::cancelUpload, c139CloudViewModel::appendUploadFiles, c139CloudViewModel::retryFailedUploads, c139CloudViewModel::dismissUploadResult) },
+            pan123CloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, pan123CloudViewModel::cancelUpload, pan123CloudViewModel::appendUploadFiles, pan123CloudViewModel::retryFailedUploads, pan123CloudViewModel::dismissUploadResult) },
+            pan115CloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, pan115CloudViewModel::cancelUpload, pan115CloudViewModel::appendUploadFiles, pan115CloudViewModel::retryFailedUploads, pan115CloudViewModel::dismissUploadResult) },
+            guangyaCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, guangyaCloudViewModel::cancelUpload, guangyaCloudViewModel::appendUploadFiles, guangyaCloudViewModel::retryFailedUploads, guangyaCloudViewModel::dismissUploadResult) },
+            ilanzouCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, ilanzouCloudViewModel::cancelUpload, ilanzouCloudViewModel::appendUploadFiles, ilanzouCloudViewModel::retryFailedUploads, ilanzouCloudViewModel::dismissUploadResult) },
+            lanzouCloudViewModel.uploadTaskProgress?.let { UploadTaskDisplay(it, lanzouCloudViewModel::cancelUpload, lanzouCloudViewModel::appendUploadFiles, lanzouCloudViewModel::retryFailedUploads, lanzouCloudViewModel::dismissUploadResult) }
         ))
 
         // 全局弹窗覆盖层（FadeAlertDialog）：窗口内直接绘制，零原生窗口开销。

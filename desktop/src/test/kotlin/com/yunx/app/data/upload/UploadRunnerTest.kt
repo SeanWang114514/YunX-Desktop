@@ -1,5 +1,6 @@
 package com.yunx.app.data.upload
 
+import com.yunx.app.data.prefs.SettingsRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,8 @@ import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.*
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -20,6 +23,13 @@ import java.util.concurrent.TimeUnit
 
 class UploadRunnerTest {
     @get:Rule val temp = TemporaryFolder()
+    private val settings = SettingsRepository()
+    private var previousConcurrency = SettingsRepository.DEFAULT_MAX_CONCURRENT_UPLOADS
+    @Before fun useSerialQueue() {
+        previousConcurrency = settings.maxConcurrentUploads
+        settings.maxConcurrentUploads = 1
+    }
+    @After fun restoreConcurrency() { settings.maxConcurrentUploads = previousConcurrency }
     private fun files(count: Int) = (1..count).map { temp.newFile().apply { writeText("file-$it") } }
 
     @Test fun `批次串行运行并统计全部成功`() = runTest {
@@ -38,7 +48,7 @@ class UploadRunnerTest {
         assertFalse(UploadSessions.isActive("test-success"))
     }
 
-    @Test fun `第二个文件失败后保留已完成数量并停止后续文件`() = runTest {
+    @Test fun `第二个文件失败后保留失败并继续后续文件`() = runTest {
         val outcome = CompletableDeferred<UploadOutcome>()
         val runner = UploadRunner(this, { OkHttpClient() }) { outcome.complete(it) }
         var calls = 0
@@ -46,10 +56,10 @@ class UploadRunnerTest {
             if (++calls == 2) error("simulated failure")
         }
         val result = outcome.await()
-        assertEquals(2, calls)
-        assertEquals(1, result.uploaded)
+        assertEquals(4, calls)
+        assertEquals(3, result.uploaded)
         assertEquals(1, result.failed)
-        assertEquals(2, result.notStarted)
+        assertEquals(0, result.notStarted)
         assertTrue(result.message().contains("simulated failure"))
     }
 

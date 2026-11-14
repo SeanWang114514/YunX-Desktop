@@ -216,10 +216,8 @@ foreach ($unused in @("lib\jvm.lib", "bin\splashscreen.dll")) {
 
 Write-Host ""
 Write-Host "[4/5] Creating app-image with jpackage (YunX-Desktop.exe)..." -ForegroundColor Cyan
-# 打包前先杀运行中的实例：YunX-Desktop.exe / java 子进程 / JCEF 助手会锁住输出目录下的 jar 和运行时文件
-Get-Process YunX-Desktop -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process | Where-Object { $_.Path -like "*\release\YunX-Desktop\*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process jcef_helper -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# 不结束运行中的实例，避免打包时中断用户的上传、下载或其他程序的 JCEF。
+# 输出被占用时仅重试，最终提示先完成任务并关闭程序。
 # 资源管理器/杀软可能短暂占用句柄，删除旧输出目录需重试
 $removed = $false
 for ($i = 1; $i -le 6; $i++) {
@@ -241,8 +239,8 @@ $jpackageExe = Join-Path $JDK "bin\jpackage.exe"
   --dest release `
   --name YunX-Desktop `
   --app-version $AppVersion `
-  --vendor "YunX-Desktop" `
-  --description "YunX-Desktop - netdisk share-link parser and high-speed downloader" `
+  --vendor "SeanWang114514" `
+  --description "YunX-Desktop Native Upload - based on tidain and CYQawa's YunX" `
   --input portable-libs `
   --main-jar desktop.jar `
   --main-class com.yunx.app.MainKt `
@@ -273,11 +271,11 @@ if (-not (Test-Path $launcherInfoDir)) { New-Item -ItemType Directory -Force -Pa
 @"
 using System.Reflection;
 
-[assembly: AssemblyTitle("云析 YunX-Desktop")]
-[assembly: AssemblyProduct("云析 YunX-Desktop")]
-[assembly: AssemblyCompany("tidain")]
-[assembly: AssemblyCopyright("Copyright (C) 2026 tidain")]
-[assembly: AssemblyDescription("网盘分享链接解析与高速下载器")]
+[assembly: AssemblyTitle("云析·原生上传版 YunX-Desktop")]
+[assembly: AssemblyProduct("YunX-Desktop-Native-Upload")]
+[assembly: AssemblyCompany("SeanWang114514")]
+[assembly: AssemblyCopyright("Copyright (C) 2026 tidain, CYQawa; modifications by SeanWang114514")]
+[assembly: AssemblyDescription("网盘原生上传、分享链接解析与高速下载")]
 [assembly: AssemblyVersion("$AppVersion")]
 [assembly: AssemblyFileVersion("$AppVersion")]
 [assembly: AssemblyInformationalVersion("$AppVersion")]

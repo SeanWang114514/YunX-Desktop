@@ -7,7 +7,8 @@ data class UploadFileProgress(
     val status: UploadFileStatus = UploadFileStatus.WAITING,
     val sent: Long = 0L,
     val bytesPerSecond: Double? = null,
-    val error: String? = null
+    val error: String? = null,
+    val stalled: Boolean = false
 ) {
     val isActive: Boolean get() = status == UploadFileStatus.PREPARING || status == UploadFileStatus.UPLOADING || status == UploadFileStatus.FINISHING
 }

@@ -112,7 +112,8 @@ fun AboutScreen(
                     "粘贴分享链接或视频短链，登录账号后即可浏览内容、在线预览并直接高速下载；" +
                     "也支持磁力 / BT 种子 / ed2k 等 P2P 链接下载。\n" +
                     "Windows 桌面端：YunX-Desktop 基于 Compose Multiplatform 构建，" +
-                    "在安卓版能力之上补齐桌面交互（右键菜单、文件夹整夹下载、可拖动窗口）。"
+                    "在安卓版能力之上补齐桌面交互（右键菜单、文件夹整夹下载、可拖动窗口）。\n" +
+                    "当前为原生上传修改版，基于 tidain 的桌面版增量修改，上传协议参考 CYQawa 的安卓版。"
             )
             
 
@@ -598,7 +599,7 @@ private fun GitHubCard() {
 private fun DesktopRepoCard() {
     Card(
         onClick = {
-            DesktopActions.openUrl("https://github.com/tidain/YunX-Desktop")
+            DesktopActions.openUrl("https://github.com/SeanWang114514/YunX-Desktop-Native-Upload")
         },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -629,12 +630,12 @@ private fun DesktopRepoCard() {
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "PC 版仓库",
+                    text = "原生上传修改版仓库",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "github.com/tidain/YunX-Desktop",
+                    text = "SeanWang114514 / YunX-Desktop-Native-Upload",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -1,6 +1,6 @@
 ﻿# YunX-Desktop 安装程序构建脚本
 # 流程：先复用 portable-package.ps1 生成免安装版（含自研启动器），再用 Inno Setup 压成单文件安装包
-# 输出：release\YunX-Desktop-setup-<版本>.exe（中文向导、可选安装目录、开始菜单/桌面快捷方式、可卸载）
+# 输出：release\YunX-Desktop-Native-Upload-setup-<版本>.exe（中文向导、可选安装目录、开始菜单/桌面快捷方式、可卸载）
 # 依赖：Inno Setup 6 缺失时自动下载并静默安装到 %LOCALAPPDATA%\Programs\Inno Setup 6
 # 注意: 本文件必须保持 UTF-8 带 BOM 编码（PS 5.1 会把无 BOM 的 UTF-8 当 ANSI 解析，中文注释变乱码）
 
@@ -77,7 +77,7 @@ Write-Host "[3/3] Compiling installer (this compresses ~200MB, may take a while)
 & $iscc "/DAppVersion=$AppVersion" (Join-Path $root "installer\YunX-Desktop.iss")
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
 
-$outFile = Join-Path $root "release\YunX-Desktop-setup-$AppVersion.exe"
+$outFile = Join-Path $root "release\YunX-Desktop-Native-Upload-setup-$AppVersion.exe"
 if (-not (Test-Path $outFile)) { throw "Installer output not found: $outFile" }
 $sizeMb = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
 Write-Host ""
