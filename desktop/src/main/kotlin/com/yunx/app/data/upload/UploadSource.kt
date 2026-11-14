@@ -20,10 +20,16 @@ class UploadSource private constructor(
     val name: String,
     val size: Long,
     val mimeType: String,
+    val parentDirectories: List<String>,
+    val isDirectory: Boolean,
     private val attributes: BasicFileAttributes
 ) {
     fun verifyUnchanged() {
-        val now = Files.readAttributes(path, BasicFileAttributes::class.java)
+        val now = Files.readAttributes(path, BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        if (isDirectory) {
+            if (!now.isDirectory || now.isOther || now.fileKey() != attributes.fileKey()) throw IOException("本地目录已变化：$name")
+            return
+        }
         if (!now.isRegularFile || now.size() != size ||
             now.lastModifiedTime() != attributes.lastModifiedTime() || now.fileKey() != attributes.fileKey()
         ) throw IOException("文件在上传期间发生变化，请重新选择：$name")
@@ -31,6 +37,7 @@ class UploadSource private constructor(
 
     /** 打开 [start, end) 区间；关闭流同时释放文件句柄。 */
     fun open(start: Long = 0L, end: Long = size): InputStream {
+        require(!isDirectory) { "文件夹不能作为文件读取" }
         require(start >= 0 && end >= start && end <= size) { "无效的文件读取区间" }
         verifyUnchanged()
         val channel = FileChannel.open(path, StandardOpenOption.READ)
@@ -46,13 +53,18 @@ class UploadSource private constructor(
     companion object {
         private val mimePattern = Regex("^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
 
-        fun resolve(file: File): UploadSource {
+        fun resolve(file: File): UploadSource = resolve(UploadCandidate(file, 0L))
+
+        fun resolve(candidate: UploadCandidate): UploadSource {
+            val file = candidate.file
             val path = file.toPath().toAbsolutePath().normalize()
-            val attributes = Files.readAttributes(path, BasicFileAttributes::class.java)
-            require(attributes.isRegularFile && Files.isReadable(path)) { "文件不存在或不可读取：${file.name}" }
-            val mime = runCatching { Files.probeContentType(path) }.getOrNull()
+            val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+            require(!attributes.isSymbolicLink && !attributes.isOther && Files.isReadable(path) &&
+                (if (candidate.isDirectory) attributes.isDirectory else attributes.isRegularFile)) { "文件或目录不存在或不可读取：${file.name}" }
+            val mime = if (candidate.isDirectory) "inode/directory" else runCatching { Files.probeContentType(path) }.getOrNull()
                 ?.takeIf { mimePattern.matches(it) } ?: "application/octet-stream"
-            return UploadSource(path, path.fileName.toString(), attributes.size(), mime, attributes)
+            return UploadSource(path, path.fileName.toString(), if (candidate.isDirectory) 0L else attributes.size(), mime,
+                candidate.parentDirectories, candidate.isDirectory, attributes)
         }
     }
 }

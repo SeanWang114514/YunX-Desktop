@@ -8,12 +8,12 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
+import com.yunx.app.data.upload.UploadCandidate
 
 class UploadUiStateTest {
     @get:Rule val temp = TemporaryFolder()
     private suspend fun CoroutineScope.finishSelection() = coroutineContext[Job]!!.children.toList().joinAll()
-    private fun state(scope: CoroutineScope, callback: (List<File>) -> Unit = {}) = UploadUiState(scope).apply {
+    private fun state(scope: CoroutineScope, callback: (List<UploadCandidate>) -> Unit = {}) = UploadUiState(scope).apply {
         enabled = true
         currentDestination = "测试网盘 / 目标目录"
         onUpload = callback
@@ -38,7 +38,7 @@ class UploadUiStateTest {
     @Test fun filesCanBeAddedAndRemovedBeforeStarting() = runBlocking {
         val one = temp.newFile("one")
         val two = temp.newFile("two")
-        var uploaded = emptyList<File>()
+        var uploaded = emptyList<UploadCandidate>()
         val state = state(this) { uploaded = it }
         state.stage(listOf(one))
         finishSelection()
@@ -46,7 +46,7 @@ class UploadUiStateTest {
         finishSelection()
         state.remove(state.files.first())
         state.start()
-        assertEquals(listOf(two.canonicalFile), uploaded)
+        assertEquals(listOf(two.canonicalFile), uploaded.map { it.file })
     }
 
     @Test fun dismissCancelsSelectionAndDoesNotUpload() = runBlocking {
@@ -75,14 +75,16 @@ class UploadUiStateTest {
         state.dismiss()
     }
 
-    @Test fun folderOnlyDropCannotStartAnEmptyBatch() = runBlocking {
-        val state = state(this) { fail("Folder must not upload") }
+    @Test fun folderOnlyDropWaitsForConfirmationAndPreservesEmptyFolder() = runBlocking {
+        var uploaded = emptyList<UploadCandidate>()
+        val state = state(this) { uploaded = it }
         state.stage(listOf(temp.newFolder()))
         finishSelection()
-        assertTrue(state.files.isEmpty())
-        assertTrue(state.notice!!.contains("文件夹"))
+        assertEquals(1, state.files.size)
+        assertTrue(state.files.single().isDirectory)
+        assertTrue(uploaded.isEmpty())
         state.start()
-        assertTrue(state.visible)
-        state.dismiss()
+        assertFalse(state.visible)
+        assertTrue(uploaded.single().isDirectory)
     }
 }

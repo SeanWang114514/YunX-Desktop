@@ -9,13 +9,15 @@ import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -26,7 +28,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +64,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.datatransfer.DataFlavor
@@ -92,10 +95,14 @@ class UploadUiState internal constructor(private val scope: CoroutineScope) {
     internal var enabled by mutableStateOf(false)
     internal var currentDestination = ""
     internal var currentAppendMode = false
-    internal var onUpload: (List<File>) -> Unit = {}
-    private var submit: (List<File>) -> Unit = {}
+    internal var onUpload: (List<UploadCandidate>) -> Unit = {}
+    private var submit: (List<UploadCandidate>) -> Unit = {}
     private var selectionJob: Job? = null
     private var selectionToken = 0
+
+    internal fun releaseSubmitted() {
+        submitted = emptyList()
+    }
 
     fun open() {
         if (!enabled || checking) return
@@ -125,8 +132,13 @@ class UploadUiState internal constructor(private val scope: CoroutineScope) {
         val token = ++selectionToken
         selectionJob = scope.launch {
             try {
-                val picked = DesktopActions.pickFiles()
-                if (picked.isNotEmpty()) merge(picked)
+                val picked = DesktopActions.pickUploadSources()
+                if (token != selectionToken) return@launch
+                if (picked.isEmpty()) {
+                    if (files.isEmpty()) dismiss()
+                } else {
+                    merge(picked)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -145,6 +157,10 @@ class UploadUiState internal constructor(private val scope: CoroutineScope) {
         selectionJob = scope.launch {
             try {
                 merge(incoming)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                notice = e.message ?: "无法扫描文件或文件夹"
             } finally {
                 if (token == selectionToken) checking = false
             }
@@ -153,24 +169,29 @@ class UploadUiState internal constructor(private val scope: CoroutineScope) {
 
     internal fun dropFailed() {
         open()
-        notice = "无法读取拖入的文件，请使用“选择文件”重试"
+        notice = "无法读取拖入的文件，请使用“选择文件或文件夹”重试"
     }
 
     private suspend fun merge(incoming: List<File>) {
         val previous = files
-        val selection = withContext(Dispatchers.IO) { UploadSelection.merge(previous, incoming) }
+        val selection = withContext(Dispatchers.IO) {
+            val context = currentCoroutineContext()
+            UploadSelection.merge(previous, incoming) { context.ensureActive() }
+        }
         files = selection.files
         notice = selection.notice
     }
 
     fun remove(file: UploadCandidate) {
-        if (!checking) files = files - file
+        if (!checking) files = files.filterNot {
+            it == file || (file.isDirectory && it.file.toPath().startsWith(file.file.toPath()))
+        }
     }
 
     fun start() {
         if (!enabled || checking || files.isEmpty()) return
         if (!appendMode) submitted = files
-        val batch = files.map { it.file }
+        val batch = files
         val action = submit
         dismiss()
         action(batch)
@@ -183,8 +204,8 @@ fun rememberUploadUi(
     destination: String,
     enabled: Boolean,
     progress: UploadProgress? = null,
-    onAppend: ((List<File>, Long) -> Int)? = null,
-    onUpload: (List<File>) -> Unit
+    onAppend: ((List<UploadCandidate>, Long) -> Int)? = null,
+    onUpload: (List<UploadCandidate>) -> Unit
 ): UploadUiState {
     val scope = rememberCoroutineScope()
     val state = remember(scope) { UploadUiState(scope) }
@@ -262,14 +283,26 @@ internal fun Modifier.uploadDropTarget(
 
 internal fun showUploadAppendResult(added: Int) {
     SnackbarController.show(when {
-        added > 0 -> "已追加 $added 个文件到上传队列"
+        added > 0 -> "已追加 $added 个文件或目录到上传队列"
         added == 0 -> "所选文件已经在本批次队列中"
         else -> "本批次已结束或停止接收文件，请重新开始上传"
     })
 }
 
+internal fun showUploadSingleRetryResult(count: Int) {
+    SnackbarController.show(when {
+        count > 0 -> "已重新排队该失败项目"
+        count == 0 -> "该项目当前不可重试"
+        else -> "任务已变化或正在停止，请查看当前任务"
+    })
+}
+
 internal fun showUploadRetryResult(count: Int) {
-    SnackbarController.show(if (count > 0) "已重新排队 $count 个失败文件" else "任务已变化或已有上传正在执行，请查看当前任务")
+    SnackbarController.show(when {
+        count > 0 -> "已重新排队 $count 个失败项目"
+        count == 0 -> "暂无可重试的失败项目"
+        else -> "任务已变化或正在停止，请查看当前任务"
+    })
 }
 
 @Composable
@@ -283,7 +316,11 @@ fun UploadIconButton(onClick: () -> Unit, enabled: Boolean) {
                 contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                 shadowElevation = 4.dp
             ) {
-                Text("上传文件", Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium)
+                Column(Modifier.widthIn(max = 320.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("上传文件或文件夹", style = MaterialTheme.typography.labelMedium)
+                    Text("点击选择，或直接拖入下方文件列表", style = MaterialTheme.typography.bodySmall)
+                    Text("支持文件和文件夹混合多选，保留目录层级与空目录；上传中可继续追加。", style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         delayMillis = 500
@@ -293,25 +330,23 @@ fun UploadIconButton(onClick: () -> Unit, enabled: Boolean) {
             enabled = enabled,
             colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)
         ) {
-            Icon(Icons.Outlined.UploadFile, contentDescription = "上传文件")
+            Icon(Icons.Outlined.UploadFile, contentDescription = "上传文件或文件夹")
         }
     }
 }
 
 @Composable
 fun UploadDropHint(state: UploadUiState, enabled: Boolean) {
+    if (!enabled || !state.dragging) return
     Surface(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         shape = MaterialTheme.shapes.medium,
-        color = if (state.dragging) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, if (state.dragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+        color = MaterialTheme.colorScheme.primaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (state.dragging) "松开文件，添加到上传列表" else "拖拽文件到此页面上传", style = MaterialTheme.typography.titleSmall)
-                Text("支持多文件 · 上传前可预览和移除 · 暂不支持文件夹", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            OutlinedButton(onClick = state::pick, enabled = enabled && !state.checking) { Text("选择文件") }
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("松开，添加到上传列表", style = MaterialTheme.typography.titleSmall)
+            Text("支持混合多选 · 保留目录层级与空目录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -323,25 +358,25 @@ fun UploadDialogs(state: UploadUiState, progress: UploadProgress?, onCancel: () 
     FadeAlertDialog(
         visible = state.visible,
         onDismissRequest = state::dismiss,
-        title = { Text(if (appendMode) "追加上传文件" else "上传文件", style = MaterialTheme.typography.headlineSmall) },
+        title = { Text(if (appendMode) "追加文件或文件夹" else "上传文件或文件夹", style = MaterialTheme.typography.headlineSmall) },
         text = {
             Column(modifier = Modifier.fillMaxWidth().uploadDropTarget(state, allowOverlays = true), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 UploadDestination(state.destination)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("已选 " + state.files.size + " 个 · " + formatUploadBytes(state.files.sumOf { it.size }), style = MaterialTheme.typography.labelLarge)
-                    TextButton(onClick = state::pick, enabled = !state.checking && state.enabled) { Text("添加文件") }
+                    Text("${state.files.count { !it.isDirectory }} 个文件 · ${state.files.count { it.isDirectory }} 个目录 · ${formatUploadBytes(state.files.sumOf { it.size })}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = state::pick, enabled = !state.checking && state.enabled) { Text("选择文件或文件夹") }
                 }
                 if (state.files.isEmpty()) {
-                    Text("选择或拖入本地文件后，在这里确认上传。", modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("选择或拖入多个文件、文件夹后，在这里确认上传。", modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     UploadFileList(state.files, onRemove = if (state.checking) null else state::remove)
                 }
                 state.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 if (state.checking) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("正在选择或检查文件…", style = MaterialTheme.typography.bodySmall)
+                    Text("正在选择或扫描文件和子文件夹…", style = MaterialTheme.typography.bodySmall)
                 }
-                Text(if (state.dragging) "松开文件，继续添加到此列表" else "可继续拖入多个文件，确认后加入上传队列。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                Text(if (state.dragging) "松开，继续添加到此列表" else "可继续拖入多个文件和文件夹；同名远端目录将合并，文件沿用网盘原有重名规则。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 Text(if (appendMode) "加入本批次固定的账号与目录，当前文件并发上限 $concurrency 个。" else "当前文件并发上限 $concurrency 个，可在设置中调整；同名文件依次上传，单个文件内的分片按顺序发送。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
@@ -352,6 +387,7 @@ fun UploadDialogs(state: UploadUiState, progress: UploadProgress?, onCancel: () 
         // 详情由主窗口常驻组件显示，切换页面后仍保留本批次的目标和文件列表。
         SideEffect {
             UploadPresentationRegistry.entries[progress.platform] = UploadPresentation(state.destination, state.submitted)
+            state.releaseSubmitted()
         }
     } else if (progress?.platform.isNullOrEmpty()) {
         UploadProgressDialog(progress, onCancel, state.destination, state.submitted)
@@ -367,20 +403,23 @@ internal fun UploadDestination(destination: String) {
 }
 
 @Composable
-internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = null, onRemove: ((UploadCandidate) -> Unit)? = null, progresses: List<UploadFileProgress> = emptyList(), modifier: Modifier = Modifier) {
+internal fun UploadFileList(files: List<UploadCandidate> = emptyList(), currentIndex: Int? = null, onRemove: ((UploadCandidate) -> Unit)? = null, progresses: List<UploadFileProgress> = emptyList(), onRetry: ((UploadCandidate) -> Unit)? = null, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
+    val itemCount = if (progresses.isNotEmpty()) progresses.size else files.size
+    fun fileAt(index: Int) = if (progresses.isNotEmpty()) progresses[index].candidate else files[index]
     LaunchedEffect(currentIndex) {
         if (progresses.isEmpty() && currentIndex != null && files.isNotEmpty()) listState.scrollToItem((currentIndex - 1).coerceIn(files.indices))
     }
     Box(modifier.fillMaxWidth().heightIn(max = 200.dp)) {
         LazyColumn(Modifier.fillMaxWidth().padding(end = 12.dp), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            itemsIndexed(files, key = { _, file -> file.file.path }) { index, file ->
+            items(count = itemCount, key = { fileAt(it).file.path }) { index ->
+                val file = fileAt(index)
                 val item = progresses.getOrNull(index)
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text("${index + 1}. ${file.file.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                            Text(if (item?.isActive == true) "${formatUploadBytes(item.sent)} / ${formatUploadBytes(file.size)}" else formatUploadBytes(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${index + 1}. ${file.relativePath}${if (file.isDirectory) "/" else ""}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            Text(if (file.isDirectory) "文件夹 · 保留目录结构" else if (item?.isActive == true) "${formatUploadBytes(item.sent)} / ${formatUploadBytes(file.size)}" else formatUploadBytes(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (item != null) Text(uploadFileStatusText(item.status), style = MaterialTheme.typography.labelSmall, color = if (item.status == UploadFileStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
                         else if (currentIndex != null) Text(when {
@@ -388,18 +427,24 @@ internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = n
                             index == currentIndex - 1 -> "处理中"
                             else -> "等待中"
                         }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        if (item?.status == UploadFileStatus.FAILED && onRetry != null) {
+                            TextButton(onClick = { onRetry(file) }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.height(24.dp)) {
+                                Text("重试", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                         onRemove?.let { remove -> IconButton(onClick = { remove(file) }) { Icon(Icons.Default.Close, contentDescription = "移除 " + file.file.name) } }
                     }
                     if (item?.isActive == true) {
                         val fraction = if (file.size <= 0) 0f else (item.sent.toDouble() / file.size).toFloat().coerceIn(0f, 1f)
-                        if (item.status == UploadFileStatus.PREPARING && item.sent == 0L) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (file.size <= 0L) LinearProgressIndicator(Modifier.fillMaxWidth())
                         else LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 if (item.stalled) "网络等待，暂无速度"
-                                else if (item.status == UploadFileStatus.UPLOADING) "${(fraction * 100).roundToLong()}% · " +
+                                else if (item.status == UploadFileStatus.UPLOADING) (if (file.size <= 0L) "上传中" else "${(fraction * 100).roundToLong()}%") + " · " +
                                     (item.bytesPerSecond?.let { "${formatUploadBytes(it.roundToLong())}/s" } ?: "--")
-                                else if (item.status == UploadFileStatus.PREPARING) "读取文件 / 计算校验"
+                                else if (file.isDirectory) "创建或合并目录"
+                                else if (item.status == UploadFileStatus.PREPARING) "准备目录 / 读取文件 / 计算校验"
                                 else "文件已发送，等待网盘确认",
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f),
@@ -418,7 +463,7 @@ internal fun UploadFileList(files: List<UploadCandidate>, currentIndex: Int? = n
                 }
             }
         }
-        if (files.isNotEmpty()) VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd))
+        if (itemCount > 0) VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd))
     }
 }
 

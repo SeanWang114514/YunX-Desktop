@@ -41,12 +41,12 @@ object WindowsFilePicker {
     }
 
     /** 原生多选，与单选共用 COM 生命周期和选项设置。必须在 EDT 调用。 */
-    fun pickFiles(initialDir: File?, title: String = "选择要上传的文件"): FilesResult {
+    fun pickFiles(initialDir: File?, title: String = "选择要上传的文件", folders: Boolean = false): FilesResult {
         val paths = mutableListOf<String>()
         val result = showDialog(
             CLSID_FILE_OPEN_DIALOG, IID_I_FILE_OPEN_DIALOG, title, initialDir,
             emptyList(), null, null,
-            FOS_FILEMUSTEXIST or FOS_PATHMUSTEXIST or FOS_ALLOWMULTISELECT,
+            FOS_PATHMUSTEXIST or FOS_ALLOWMULTISELECT or (if (folders) FOS_PICKFOLDERS else FOS_FILEMUSTEXIST),
             paths
         )
         return when (result) {
@@ -65,6 +65,7 @@ object WindowsFilePicker {
 
     // FILEOPENDIALOGOPTIONS 标志
     private const val FOS_OVERWRITEPROMPT = 0x2
+    private const val FOS_PICKFOLDERS = 0x20
     private const val FOS_FORCEFILESYSTEM = 0x40
     private const val FOS_ALLOWMULTISELECT = 0x200
     private const val FOS_PATHMUSTEXIST = 0x800

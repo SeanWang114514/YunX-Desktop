@@ -40,12 +40,14 @@ class UploadSelectionTest {
         assertTrue(selection.notice!!.contains("重复"))
     }
 
-    @Test fun foldersAndMissingFilesAreSkippedWithNotice() {
+    @Test fun emptyFoldersAreKeptAndMissingFilesAreSkippedWithNotice() {
         val good = temp.newFile("good.txt")
-        val result = UploadSelection.merge(emptyList(), listOf(temp.newFolder("folder"), File(temp.root, "missing"), good))
-        assertEquals(listOf(good.canonicalFile), result.files.map { it.file })
-        assertTrue(result.notice!!.contains("文件夹"))
-        assertTrue(result.notice.contains("不可读取"))
+        val folder = temp.newFolder("folder")
+        val result = UploadSelection.merge(emptyList(), listOf(folder, File(temp.root, "missing"), good))
+        assertEquals(listOf(folder.canonicalFile, good.canonicalFile), result.files.map { it.file })
+        assertTrue(result.files.first().isDirectory)
+        assertEquals(0L, result.files.first().size)
+        assertTrue(result.notice!!.contains("不可读取"))
     }
 
     @Test fun addingFilesPreservesOrderAndDistinctSameNames() {

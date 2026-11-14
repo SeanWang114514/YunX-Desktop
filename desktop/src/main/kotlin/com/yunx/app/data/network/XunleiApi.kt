@@ -439,17 +439,26 @@ class XunleiApi(
         accessToken: String,
         deviceId: String,
         captchaToken: String
-    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+    ): List<ShareFile>? = getFilesPage(parentId, accessToken, deviceId, captchaToken)?.files
+
+    suspend fun getFilesPage(
+        parentId: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String,
+        pageToken: String = ""
+    ): XunleiFilePage? = withContext(Dispatchers.IO) {
         val filters = java.net.URLEncoder.encode("""{"trashed":{"eq":false}}""", "UTF-8")
         val url = buildString {
             append(XunleiConstants.FILES_URL)
             append("?parent_id=").append(parentId)
-            append("&page_token=&limit=50&with_audit=true&filters=").append(filters)
+            append("&page_token=").append(java.net.URLEncoder.encode(pageToken, "UTF-8"))
+            append("&limit=50&with_audit=true&filters=").append(filters)
         }
         panCall(captchaToken, deviceId, "GET:/drive/v1/files", { t ->
             panRequest(url, accessToken, deviceId, t)
         }) { data ->
-            data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList()
+            XunleiFilePage(data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList(), data.optString("next_page_token"))
         }
     }
 

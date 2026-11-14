@@ -1,6 +1,8 @@
 package com.yunx.app.ui.viewmodel
 
-import java.io.File
+import com.yunx.app.data.upload.UploadCandidate
+import com.yunx.app.data.upload.UploadDirectoryResolver
+import com.yunx.app.data.upload.uploadDirectoryEntries
 import com.yunx.app.data.upload.UploadProgress
 import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
@@ -692,9 +694,10 @@ class XunleiCloudViewModel(
      * 目标目录在这里就先固定下来（上传期间用户可能切目录、返回上级），
      * 凭据留到 IO 线程现取，避免拿着已过期的 Cookie 一路失败。
      */
-    fun uploadFiles(files: List<File>) {
+    fun uploadFiles(files: List<UploadCandidate>) {
         val dir = (uiState.value as? XunleiCloudUiState.Loaded)?.dirFid ?: return
-        uploadRunner.start(files, DownloadPlatform.XUNLEI) { io, source ->
+        val directories = UploadDirectoryResolver(dir)
+        uploadRunner.startCandidates(files, DownloadPlatform.XUNLEI, onRetry = directories::retryFailed) { io, source ->
             // 并发文件独立缓存凭据，避免刷新令牌与验证码时互相覆盖。
             val uploadApi = XunleiApi().apply {
                 refreshTokenProvider = api.refreshTokenProvider
@@ -702,16 +705,24 @@ class XunleiCloudViewModel(
             }
             val (token, deviceId, captcha) = creds() ?: throw UploadSessionException("请先登录迅雷云盘")
             uploadApi.cacheUserId(token)
-            uploadApi.upload(io, source, dir, token, deviceId, captcha)
+            directories.transfer(source,
+                list = { parent -> uploadDirectoryEntries { cursor ->
+                    val page = uploadApi.getFilesPage(parent, token, deviceId, captcha, cursor ?: "")
+                        ?: error("无法读取目标目录")
+                    page.files to page.nextPageToken.takeIf { it.isNotBlank() }
+                } },
+                create = { parent, name -> uploadApi.createFolder(name, parent, token, deviceId, captcha) }
+            ) { parent -> uploadApi.upload(io, source, parent, token, deviceId, captcha) }
         }
     }
 
     /** 取消当前上传（正在发的那一段会立刻被打断） */
     fun cancelUpload() = uploadRunner.cancel()
 
-    fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+    fun appendUploadFiles(files: List<UploadCandidate>, batchId: Long): Int = uploadRunner.appendCandidates(files, batchId)
 
     fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+    fun retryUploadFile(batchId: Long, candidate: UploadCandidate): Int = uploadRunner.retrySingle(batchId, candidate)
 
     fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 

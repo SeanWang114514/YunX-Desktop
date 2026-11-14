@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,19 +31,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.upload.UploadCandidate
 import com.yunx.app.data.upload.UploadProgress
 import java.io.File
-import kotlin.math.roundToLong
 
 internal data class UploadTaskDisplay(
     val progress: UploadProgress,
     val onCancel: () -> Unit,
-    val onAppend: (List<File>, Long) -> Int,
+    val onAppend: (List<UploadCandidate>, Long) -> Int,
     val onRetry: (Long) -> Int,
+    val onRetryFile: (Long, UploadCandidate) -> Int,
     val onDismiss: (Long) -> Unit
 )
 internal data class UploadPresentation(val destination: String, val files: List<UploadCandidate>)
@@ -89,6 +87,7 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
             // 先提交本次批次的目标和回调，再打开原生多选，避免首次点击读到旧状态。
             withFrameNanos { }
             val files = droppedFiles
+            droppedFiles = null
             if (files == null) appendUi.pick() else appendUi.stage(files)
         }
     }
@@ -135,25 +134,16 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
                             }
                         }
                         Text("并发 ${p.activeCount}/${p.concurrencyLimit} · 失败 ${p.failedCount} · 取消 ${p.cancelledCount}", style = MaterialTheme.typography.bodySmall)
+                        LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
+                        UploadBatchMetrics(p)
                         if (p.files.isEmpty()) Text(p.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         else {
-                            Text("全部 ${p.count} 个文件 · 滚动查看", style = MaterialTheme.typography.labelSmall)
-                            key(p.platform, p.batchId) { UploadFileList(p.files.map { it.candidate }, progresses = p.files, modifier = Modifier.heightIn(max = 120.dp)) }
+                            Text("${p.files.count { !it.candidate.isDirectory }} 个文件 · ${p.files.count { it.candidate.isDirectory }} 个目录 · 滚动查看", style = MaterialTheme.typography.labelSmall)
+                            key(p.platform, p.batchId) { UploadFileList(progresses = p.files, onRetry = { file -> showUploadSingleRetryResult(task.onRetryFile(p.batchId, file)) }, modifier = Modifier.heightIn(max = 120.dp)) }
                         }
                         p.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                        LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "${(p.fraction * 100).roundToLong()}% · " +
-                                    (p.bytesPerSecond?.let { "${formatUploadBytes(it.roundToLong())}/s" } ?: "--"),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Box(Modifier.size(width = 132.dp, height = 28.dp), contentAlignment = Alignment.CenterEnd) {
-                                Text(formatUploadRemainingTime(p.remainingSeconds), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
-                            }
-                        }
-                        if (p.finished && p.canRetry) TextButton(onClick = { showUploadRetryResult(task.onRetry(p.batchId)) }) {
-                            Text("重试失败的 ${p.failedCount} 个文件")
+                        if (p.canRetry) TextButton(onClick = { showUploadRetryResult(task.onRetry(p.batchId)) }) {
+                            Text("重试失败的 ${p.failedCount} 项")
                         }
                     }
                 }
@@ -172,6 +162,7 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
         onAddFiles = expanded?.let { { requestAppend(it) } },
         onDropFiles = expanded?.let { task -> { files -> requestAppend(task, files) } },
         onRetry = expanded?.let { task -> { showUploadRetryResult(task.onRetry(task.progress.batchId)) } },
+        onRetryFile = expanded?.let { task -> { file -> showUploadSingleRetryResult(task.onRetryFile(task.progress.batchId, file)) } },
         onDismissResult = expanded?.let { task -> { task.onDismiss(task.progress.batchId) } }
     )
     UploadDialogs(appendUi, progress = null, onCancel = {}, appendMode = true)

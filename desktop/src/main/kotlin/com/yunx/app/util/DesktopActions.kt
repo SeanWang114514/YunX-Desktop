@@ -220,6 +220,18 @@ object DesktopActions {
         }
     }.getOrNull()
 
+    /** 上传混选入口；调用方在 EDT 打开，取消返回空列表，类型由上传扫描器识别。 */
+    fun pickUploadSources(): List<File> {
+        try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
+        val chooser = JFileChooser(defaultDownloadDir).apply {
+            fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
+            isMultiSelectionEnabled = true
+            dialogTitle = "选择要上传的文件或文件夹"
+            approveButtonText = "选择"
+        }
+        return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFiles.toList() else emptyList()
+    }
+
     /**
      * 弹出文件选择对话框（导入备份等）。
      *
@@ -230,23 +242,6 @@ object DesktopActions {
      * @param filters 文件类型过滤器（显示名 to 通配符），空则不过滤
      * @return 选中文件绝对路径；取消返回 null
      */
-    /** 调用方在 EDT 打开；返回空列表表示取消。 */
-    fun pickFiles(): List<File> {
-        if (WindowsTitleBar.isWindows) {
-            when (val result = WindowsFilePicker.pickFiles(defaultDownloadDir.takeIf { it.isDirectory })) {
-                is WindowsFilePicker.FilesResult.Success -> return result.paths.map(::File)
-                WindowsFilePicker.FilesResult.Cancelled -> return emptyList()
-                WindowsFilePicker.FilesResult.Unavailable -> Unit
-            }
-        }
-        val dialog = FileDialog(null as Frame?, "选择要上传的文件", FileDialog.LOAD)
-        return try {
-            dialog.isMultipleMode = true
-            dialog.isVisible = true
-            dialog.files.toList()
-        } finally { dialog.dispose() }
-    }
-
     fun pickFile(filters: List<Pair<String, String>> = emptyList()): String? {
         val osName = System.getProperty("os.name", "").lowercase()
         val isMac = osName.contains("mac") || osName.contains("darwin")

@@ -1,6 +1,8 @@
 package com.yunx.app.ui.viewmodel
 
-import java.io.File
+import com.yunx.app.data.upload.UploadCandidate
+import com.yunx.app.data.upload.UploadDirectoryResolver
+import com.yunx.app.data.upload.uploadDirectoryEntries
 import com.yunx.app.data.upload.UploadProgress
 import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
@@ -773,20 +775,30 @@ class QuarkCloudViewModel(
      * 目标目录在这里就先固定下来（上传期间用户可能切目录、返回上级），
      * 凭据留到 IO 线程现取，避免拿着已过期的 Cookie 一路失败。
      */
-    fun uploadFiles(files: List<File>) {
+    fun uploadFiles(files: List<UploadCandidate>) {
         val dir = (uiState.value as? QuarkCloudUiState.Loaded)?.dirFid ?: return
-        uploadRunner.start(files, DownloadPlatform.QUARK) { io, source ->
+        val directories = UploadDirectoryResolver(dir)
+        uploadRunner.startCandidates(files, DownloadPlatform.QUARK, onRetry = directories::retryFailed) { io, source ->
             val cookie = cookieProvider() ?: throw UploadSessionException("请先登录夸克网盘")
-            api.upload(io, source, dir, cookie)
+            directories.transfer(source,
+                list = { parent -> uploadDirectoryEntries { cursor ->
+                    val page = cursor?.toInt() ?: 1
+                    val entries = api.listCloudFiles(parent, cookie, page = page)
+                        ?: error("无法读取目标目录")
+                    entries to if (entries.size >= 50) (page + 1).toString() else null
+                } },
+                create = { parent, name -> api.createFolder(name, parent, cookie) }
+            ) { parent -> api.upload(io, source, parent, cookie) }
         }
     }
 
     /** 取消当前上传（正在发的那一段会立刻被打断） */
     fun cancelUpload() = uploadRunner.cancel()
 
-    fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+    fun appendUploadFiles(files: List<UploadCandidate>, batchId: Long): Int = uploadRunner.appendCandidates(files, batchId)
 
     fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+    fun retryUploadFile(batchId: Long, candidate: UploadCandidate): Int = uploadRunner.retrySingle(batchId, candidate)
 
     fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 

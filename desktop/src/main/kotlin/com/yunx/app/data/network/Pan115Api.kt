@@ -111,7 +111,8 @@ class Pan115Api(
         cid: String,
         cookie: String,
         offset: Int = 0,
-        limit: Int = Pan115Constants.PAGE_LIMIT
+        limit: Int = Pan115Constants.PAGE_LIMIT,
+        compact: Boolean = false
     ): Pan115FilePage = withContext(Dispatchers.IO) {
         val url = buildString {
             append(Pan115Constants.FILES_URL)
@@ -121,7 +122,7 @@ class Pan115Api(
             append("&offset=").append(offset)
             append("&show_dir=1")
             append("&limit=").append(limit)
-            append("&snap=0&natsort=1&record_open_time=1&count_folders=1")
+            if (compact) append("&record_open_time=0&count_folders=0") else append("&snap=0&natsort=1&record_open_time=1&count_folders=1")
             append("&format=json")
         }
         val json = getJson(url, cookie, Pan115Constants.REFERER)

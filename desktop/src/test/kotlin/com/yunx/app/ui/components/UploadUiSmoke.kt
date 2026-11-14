@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.yunx.app.data.upload.UploadCandidate
 import com.yunx.app.data.upload.UploadPhase
 import com.yunx.app.data.upload.UploadRunner
 import com.yunx.app.ui.theme.ComposeEmptyActivityTheme
@@ -23,6 +24,7 @@ fun main(args: Array<String>) {
     System.setProperty("skiko.renderApi", "SOFTWARE")
     Timer(480_000) { System.exit(0) }.apply { isRepeats = false; start() }
     application {
+        // The smoke harness drives Compose from a coroutine so simulated delays are legal.
         Window(onCloseRequest = { System.exit(0) }, title = "YunX 上传界面验证（离线）", state = rememberWindowState(width = 880.dp, height = 700.dp)) {
             ComposeEmptyActivityTheme {
                 val scope = rememberCoroutineScope()
@@ -31,8 +33,8 @@ fun main(args: Array<String>) {
                     result = it.message()
                     println("UI_OUTCOME " + result)
                 } }
-                val ui = rememberUploadUi("smoke-dir", "测试网盘 / 中文目标目录", runner.progress == null) { files ->
-                    runner.start(files, "upload-ui-smoke", { "local-test-account" }) { io, source ->
+                val ui = rememberUploadUi("smoke-dir", "测试网盘 / 中文目标目录", runner.progress == null) { files: List<UploadCandidate> ->
+                    runner.startCandidates(files, "upload-ui-smoke", { "local-test-account" }) { io, source ->
                         io.progress(UploadPhase.PREPARING)
                         delay(700)
                         repeat(20) {

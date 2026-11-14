@@ -132,4 +132,44 @@ class UploadRunnerTest {
         assertFalse(UploadSessions.isActive("test-dead-scope"))
         assertFalse(runner.isRunning)
     }
+
+    @Test fun `单项重试只重排指定失败项并清除旧错误`() = runTest {
+        val outcome = CompletableDeferred<UploadOutcome>()
+        val runner = UploadRunner(this, { OkHttpClient() }) { outcome.complete(it) }
+        val selected = files(2)
+        val failing = selected[1]
+        var attempt = 0
+        runner.start(selected, "test-single-retry", { "A" }) { _, source ->
+            if (source.path.toFile() == failing && attempt++ == 0) error("first failure")
+            if (source.path.toFile() == failing) awaitCancellation()
+        }
+        repeat(100) {
+            if (runner.progress?.files?.firstOrNull { it.candidate.file == failing }?.status == UploadFileStatus.FAILED) return@repeat
+            kotlinx.coroutines.yield()
+        }
+        assertEquals(UploadFileStatus.FAILED, runner.progress?.files?.firstOrNull { it.candidate.file == failing }?.status)
+        val failed = runner.progress!!.files.first { it.candidate.file == failing }
+        assertEquals("first failure", failed.error)
+        assertEquals(1, runner.retrySingle(runner.progress!!.batchId, failed.candidate))
+        val queued = runner.progress!!.files.first { it.candidate.file == failing }
+        assertNull(queued.error)
+        assertEquals(0L, queued.sent)
+        runner.cancel()
+        assertTrue(outcome.await().cancelled)
+    }
+
+    @Test fun `未知文件大小不会显示虚假的总完成率`() = runTest {
+        val progress = UploadProgress(
+            index = 1,
+            count = 1,
+            name = "unknown.bin",
+            sent = 0L,
+            size = 0L,
+            phase = UploadPhase.PREPARING,
+            files = listOf(UploadFileProgress(UploadCandidate(temp.newFile(), 0L)))
+        )
+        assertFalse(progress.sizeKnown)
+        assertEquals(0f, progress.fraction)
+        assertNull(progress.remainingSeconds)
+    }
 }

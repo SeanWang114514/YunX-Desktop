@@ -17,6 +17,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.upload.UploadPhase
 import com.yunx.app.data.upload.UploadProgress
@@ -37,6 +38,7 @@ fun UploadProgressDialog(
     onAddFiles: (() -> Unit)? = null,
     onDropFiles: ((List<File>) -> Unit)? = null,
     onRetry: (() -> Unit)? = null,
+    onRetryFile: ((UploadCandidate) -> Unit)? = null,
     onDismissResult: (() -> Unit)? = null
 ) {
     BackHandler(enabled = progress != null) { onBackground?.invoke() }
@@ -74,35 +76,19 @@ fun UploadProgressDialog(
                     })
                     if (p.files.isNotEmpty() || p.phase == UploadPhase.UPLOADING) {
                         LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
-                        Text("已发送 ${formatUploadBytes(p.sent)} / ${formatUploadBytes(p.size)}（${(p.fraction * 100).roundToLong()}%）")
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "${if (p.files.isNotEmpty()) "合计" else "速度"} " + (p.bytesPerSecond?.let { "${formatUploadBytes(it.roundToLong())}/s" } ?: "--"),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Box(modifier = Modifier.size(width = 132.dp, height = 28.dp), contentAlignment = Alignment.CenterEnd) {
-                                Text(
-                                    "剩余 " + formatUploadRemainingTime(p.remainingSeconds),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
+                        UploadBatchMetrics(p)
                     } else {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
+                    if (p.canRetry && onRetry != null) TextButton(onClick = onRetry) {
+                        Text("重试失败的 ${p.failedCount} 项")
+                    }
                     if (p.files.isNotEmpty()) {
-                        Text("文件任务 · 滚动查看全部 ${p.count} 个文件", style = MaterialTheme.typography.labelLarge)
-                        key(p.platform, p.batchId) { UploadFileList(p.files.map { it.candidate }, progresses = p.files) }
+                        Text("${p.files.count { !it.candidate.isDirectory }} 个文件 · ${p.files.count { it.candidate.isDirectory }} 个目录 · 滚动查看", style = MaterialTheme.typography.labelLarge)
+                        key(p.platform, p.batchId) { UploadFileList(progresses = p.files, onRetry = onRetryFile) }
                     } else if (files.isNotEmpty()) UploadFileList(files, currentIndex = p.index)
                     Text(when {
-                        !p.finished -> "可拖入文件追加，点击空白处后台上传。取消或退出程序会中止未完成文件，不撤回已保存文件。"
+                        !p.finished -> "可拖入文件或文件夹追加，点击空白处后台上传。取消或退出程序会中止未完成项目，不撤回已保存内容。"
                         p.canRetry -> "可仅重试失败文件；若上次确认中断，请先检查网盘是否已保存，避免重复上传。"
                         else -> "已取消的文件需重新选择；已保存的文件不会撤回。"
                     }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -111,9 +97,7 @@ fun UploadProgressDialog(
         },
         dismissButton = {
             if (onBackground != null) TextButton(onClick = onBackground) { Text(if (progress?.finished == true) "收起结果" else "后台上传") }
-            if (progress?.finished == true) {
-                if (progress.canRetry && onRetry != null) TextButton(onClick = onRetry) { Text("重试失败文件") }
-            } else if (onAddFiles != null) TextButton(onClick = onAddFiles, enabled = progress?.canAppend == true && progress.cancelling == false) { Text("添加文件") }
+            if (progress?.finished != true && onAddFiles != null) TextButton(onClick = onAddFiles, enabled = progress?.canAppend == true && progress.cancelling == false) { Text("添加文件") }
         },
         confirmButton = {
             if (progress?.finished == true) TextButton(onClick = { onDismissResult?.invoke() }) { Text("关闭结果") }
@@ -122,6 +106,31 @@ fun UploadProgressDialog(
             }
         }
     )
+}
+
+@Composable
+internal fun UploadBatchMetrics(progress: UploadProgress) {
+    val speed = progress.bytesPerSecond?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            if (progress.sizeKnown) "已发送 ${formatUploadBytes(progress.sent)} / ${formatUploadBytes(progress.size)}（${(progress.fraction * 100).roundToLong()}%）"
+            else "已发送 ${formatUploadBytes(progress.sent)} · 总大小未知",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("总速度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${formatUploadBytes(speed.roundToLong())}/s", style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("预计剩余", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.size(width = 132.dp, height = 28.dp), contentAlignment = Alignment.CenterEnd) {
+                    Text(formatUploadRemainingTime(progress.remainingSeconds), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+    }
 }
 
 internal fun formatUploadRemainingTime(seconds: Long?): String {

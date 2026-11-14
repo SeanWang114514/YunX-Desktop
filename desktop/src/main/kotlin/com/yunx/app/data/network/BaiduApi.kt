@@ -395,14 +395,14 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String, 
      *  - errno=-6（bdstoken 失效）→ 强制 refreshBdstoken 后重试一次
      *  - 其它非零 errno → 抛 IllegalStateException（不静默吞掉，避免误判为空目录）
      */
-    suspend fun listCloudFiles(dir: String, cookie: String): List<ShareFile> = withContext(Dispatchers.IO) {
+    suspend fun listCloudFiles(dir: String, cookie: String, page: Int = 1): List<ShareFile> = withContext(Dispatchers.IO) {
         val bdstoken = getBdstoken(cookie)
         // 首试：用当前 bdstoken（可能为空，仍尝试一次让服务端兜底）
-        var (array, errno) = requestListCloudFiles(dir, cookie, bdstoken)
+        var (array, errno) = requestListCloudFiles(dir, cookie, bdstoken, page)
         if (errno == -6) {
             // bdstoken 失效：强制刷新后重试一次
             val fresh = refreshBdstoken(cookie) ?: bdstoken
-            val (array2, errno2) = requestListCloudFiles(dir, cookie, fresh)
+            val (array2, errno2) = requestListCloudFiles(dir, cookie, fresh, page)
             array = array2
             errno = errno2
         }
@@ -434,12 +434,13 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String, 
     private suspend fun requestListCloudFiles(
         dir: String,
         cookie: String,
-        bdstoken: String?
+        bdstoken: String?,
+        page: Int
     ): Pair<JSONArray, Int> = withContext(Dispatchers.IO) {
         val bdstokenPart = bdstoken?.takeIf { it.isNotBlank() }?.let { "&bdstoken=$it" } ?: ""
         val url = "https://pan.baidu.com/api/list?clienttype=0&app_id=${BaiduConstants.APP_ID}" +
             "&web=1&channel=chunlei&showempty=0&order=time&desc=1&dir=" +
-            URLEncoder.encode(dir, "UTF-8") + "&num=100&page=1" + bdstokenPart
+            URLEncoder.encode(dir, "UTF-8") + "&num=100&page=$page" + bdstokenPart
         val request = Request.Builder()
             .url(url)
             .header("Cookie", cookie)

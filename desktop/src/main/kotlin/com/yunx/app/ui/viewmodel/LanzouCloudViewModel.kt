@@ -1,6 +1,7 @@
 package com.yunx.app.ui.viewmodel
 
-import java.io.File
+import com.yunx.app.data.upload.UploadCandidate
+import com.yunx.app.data.upload.UploadDirectoryResolver
 import com.yunx.app.data.upload.UploadProgress
 import com.yunx.app.data.upload.UploadSessionException
 import com.yunx.app.data.upload.UploadRunner
@@ -705,20 +706,26 @@ class LanzouCloudViewModel(
      * 目标目录在这里就先固定下来（上传期间用户可能切目录、返回上级），
      * 凭据留到 IO 线程现取，避免拿着已过期的 Cookie 一路失败。
      */
-    fun uploadFiles(files: List<File>) {
+    fun uploadFiles(files: List<UploadCandidate>) {
         val dir = (uiState.value as? LanzouCloudUiState.Loaded)?.dirId ?: return
-        uploadRunner.start(files, DownloadPlatform.LANZOU) { io, source ->
+        val directories = UploadDirectoryResolver(dir)
+        uploadRunner.startCandidates(files, DownloadPlatform.LANZOU, onRetry = directories::retryFailed) { io, source ->
             val cred = creds()
-            api.upload(io, source, dir, cred.cookie, cred.uid, cred.vei)
+            directories.transfer(source,
+                list = { parent -> api.listCloudFiles(cred.cookie, cred.uid, cred.vei, parent)
+                    .map { if (it.isdir) it.copy(fid = folderNumeric(it.fid)) else it } },
+                create = { parent, name -> api.createFolder(cred.cookie, cred.uid, cred.vei, parent, name) }
+            ) { parent -> api.upload(io, source, parent, cred.cookie, cred.uid, cred.vei) }
         }
     }
 
     /** 取消当前上传（正在发的那一段会立刻被打断） */
     fun cancelUpload() = uploadRunner.cancel()
 
-    fun appendUploadFiles(files: List<File>, batchId: Long): Int = uploadRunner.append(files, batchId)
+    fun appendUploadFiles(files: List<UploadCandidate>, batchId: Long): Int = uploadRunner.appendCandidates(files, batchId)
 
     fun retryFailedUploads(batchId: Long): Int = uploadRunner.retryFailed(batchId)
+    fun retryUploadFile(batchId: Long, candidate: UploadCandidate): Int = uploadRunner.retrySingle(batchId, candidate)
 
     fun dismissUploadResult(batchId: Long) = uploadRunner.dismissResult(batchId)
 
