@@ -23,7 +23,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,11 +30,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.upload.UploadCandidate
 import com.yunx.app.data.upload.UploadProgress
 import java.io.File
+import kotlin.math.roundToLong
 
 internal data class UploadTaskDisplay(
     val progress: UploadProgress,
@@ -102,8 +103,8 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
     val backgroundTasks = tasks.filter { it.progress.platform != expandedPlatform }
     if (backgroundTasks.isNotEmpty()) Box(Modifier.fillMaxSize().padding(16.dp)) {
         Column(
-            modifier = Modifier.align(Alignment.BottomEnd).widthIn(max = 360.dp).fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.align(Alignment.BottomEnd).widthIn(max = 280.dp).fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             backgroundTasks.forEach { task ->
                 val p = task.progress
@@ -116,12 +117,12 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shadowElevation = 4.dp
                 ) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(when {
-                                p.finished -> "上传结束 · 成功 ${p.completed}/${p.count}"
+                                p.finished -> "上传结束 · ${p.completed}/${p.count}"
                                 p.cancelling -> "正在取消…"
-                                else -> "后台上传 · 完成 ${p.completed}/${p.count}"
+                                else -> "后台上传 · ${p.completed}/${p.count}"
                             }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             TextButton(onClick = { expandedPlatform = p.platform }, modifier = Modifier.height(24.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
                                 Text("查看任务", style = MaterialTheme.typography.labelSmall)
@@ -133,17 +134,25 @@ internal fun UploadProgressHost(tasks: List<UploadTaskDisplay>) {
                                 Text("关闭", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        Text("并发 ${p.activeCount}/${p.concurrencyLimit} · 失败 ${p.failedCount} · 取消 ${p.cancelledCount}", style = MaterialTheme.typography.bodySmall)
                         LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
-                        UploadBatchMetrics(p)
-                        if (p.files.isEmpty()) Text(p.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        else {
-                            Text("${p.files.count { !it.candidate.isDirectory }} 个文件 · ${p.files.count { it.candidate.isDirectory }} 个目录 · 滚动查看", style = MaterialTheme.typography.labelSmall)
-                            key(p.platform, p.batchId) { UploadFileList(progresses = p.files, onRetry = { file -> showUploadSingleRetryResult(task.onRetryFile(p.batchId, file)) }, modifier = Modifier.heightIn(max = 120.dp)) }
+                        Text(
+                            if (p.sizeKnown) "${(p.fraction * 100).roundToLong()}% · ${formatUploadBytes(p.sent)} / ${formatUploadBytes(p.size)}"
+                            else "已发送 ${formatUploadBytes(p.sent)} · 总大小未知",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val speed = p.bytesPerSecond?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+                            Text("${formatUploadBytes(speed.roundToLong())}/s", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("剩余 ${formatUploadRemainingTime(p.remainingSeconds)}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
                         }
-                        p.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                        if (p.canRetry) TextButton(onClick = { showUploadRetryResult(task.onRetry(p.batchId)) }) {
-                            Text("重试失败的 ${p.failedCount} 项")
+                        if (p.failedCount > 0 || p.cancelledCount > 0) {
+                            Text("失败 ${p.failedCount} · 取消 ${p.cancelledCount}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        p.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        if (p.canRetry) TextButton(onClick = { showUploadRetryResult(task.onRetry(p.batchId)) }, modifier = Modifier.height(24.dp), contentPadding = PaddingValues(0.dp)) {
+                            Text("重试失败的 ${p.failedCount} 项", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
